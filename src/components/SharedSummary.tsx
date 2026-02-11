@@ -4,9 +4,10 @@ import { marked } from 'marked';
 interface SharedSummaryProps {
   id: string;
   onBack: () => void;
+  onChat: () => void;
 }
 
-export default function SharedSummary({ id, onBack }: SharedSummaryProps) {
+export default function SharedSummary({ id, onBack, onChat }: SharedSummaryProps) {
   const [videoUrl, setVideoUrl] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [streaming, setStreaming] = React.useState(false);
@@ -159,7 +160,7 @@ export default function SharedSummary({ id, onBack }: SharedSummaryProps) {
             </>
           )}
         </div>
-        <button type="button" className="summarize-btn" onClick={onBack}>
+        <button type="button" className="summarize-btn" onClick={onChat}>
           Chat about it
         </button>
       </main>

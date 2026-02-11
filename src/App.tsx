@@ -276,7 +276,13 @@ export default function App() {
 
   const sharedMatch = page.match(/^\/([a-f0-9]{8})$/);
   if (sharedMatch) {
-    return <SharedSummary id={sharedMatch[1]} onBack={() => navigate('/')} />;
+    return (
+      <SharedSummary
+        id={sharedMatch[1]}
+        onBack={() => navigate('/')}
+        onChat={() => navigate(`/${sharedMatch[1]}/chat`)}
+      />
+    );
   }
 
   return (

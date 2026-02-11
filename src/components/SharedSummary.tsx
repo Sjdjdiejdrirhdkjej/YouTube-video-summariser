@@ -160,7 +160,7 @@ export default function SharedSummary({ id, onBack }: SharedSummaryProps) {
           )}
         </div>
         <button type="button" className="summarize-btn" onClick={onBack}>
-          Summarize your own video
+          Chat about it
         </button>
       </main>
     </div>

@@ -1,0 +1,47 @@
+{
+  "name": "react-typescript",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "React TypeScript on Replit, using Vite bundler",
+  "scripts": {
+    "dev": "concurrently \"bun run dev:client\" \"bun run dev:server\"",
+    "dev:client": "vite",
+    "dev:server": "bun run server/index.ts",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.2.2",
+    "@types/react": "^18.0.15",
+    "@types/react-dom": "^18.0.6",
+    "@vitejs/plugin-react": "^2.0.0",
+    "concurrently": "^9.2.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^4.7.4",
+    "vite": "^3.0.4"
+  },
+  "dependencies": {
+    "@google/genai": "^1.40.0",
+    "@google/generative-ai": "^0.24.1",
+    "@openai/codex": "^0.98.0",
+    "@playzone/youtube-transcript": "^1.0.0",
+    "@sourcegraph/amp": "^0.0.1770768480-ge56951",
+    "algoliasearch": "^5.48.0",
+    "codebuff": "^1.0.617",
+    "cohere-ai": "^7.20.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.4",
+    "express": "^5.2.1",
+    "marked": "^17.0.1",
+    "opencode-ai": "^1.1.56",
+    "react-instantsearch": "^7.23.2",
+    "vercel": "^50.15.1",
+    "youtube-transcript": "^1.2.1"
+  }
+}

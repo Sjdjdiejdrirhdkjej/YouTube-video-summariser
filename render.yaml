@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: yt-video-summariser
+    env: node
+    buildCommand: npm run build
+    startCommand: node server/index.js
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: COHERE_API_KEY
+        sync: false
+    scaling:
+      minInstances: 1
+      maxInstances: 10

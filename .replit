@@ -53,6 +53,7 @@ externalPort = 5000
 
 [agent]
 expertMode = true
+integrations = ["javascript_openai_ai_integrations:2.0.0"]
 
 [workflows]
 runButton = "Project"

@@ -49,8 +49,10 @@ import express from 'express';
 import cors from 'cors';
 import { GoogleGenAI } from '@google/genai';
 import { CohereClientV2 } from 'cohere-ai';
+import { OpenAI } from 'openai';
 import { gatherSignals, buildFusionPrompt, extractVideoId as extractId } from './youtube.js';
 
+const openai = new OpenAI();
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -419,26 +421,25 @@ app.post('/api/chat', async (req, res) => {
 
     const systemPrompt = `You are a helpful assistant discussing a YouTube video. Here is the video summary for context:\n\n${chatSummary}\n\nVideo URL: ${chatVideoUrl}\n\nAnswer the user's questions based on this summary. Be concise and use markdown formatting.`;
 
-    const messages: Array<{ role: string; content: string }> = [
+    const chatMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: systemPrompt },
-      ...chatHistory,
+      ...chatHistory.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
       { role: 'user', content: message },
     ];
 
-    const stream = await cohere.chatStream({
-      model: 'command-a-reasoning-08-2025',
-      messages,
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-5.2',
+      messages: chatMessages,
+      stream: true,
     });
 
     let fullResponse = '';
-    for await (const event of stream) {
+    for await (const chunk of stream) {
       if (abortController.signal.aborted) break;
-      if (event.type === 'content-delta') {
-        const text = event.delta?.message?.content?.text;
-        if (text) {
-          fullResponse += text;
-          if (!writeSSE({ text })) break;
-        }
+      const text = chunk.choices[0]?.delta?.content || '';
+      if (text) {
+        fullResponse += text;
+        if (!writeSSE({ text })) break;
       }
     }
 

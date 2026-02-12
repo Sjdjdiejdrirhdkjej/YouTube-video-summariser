@@ -6,6 +6,15 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: '0.0.0.0',
+    port: 5000,
+    strictPort: true,
+    hmr: {
+      clientPort: 443
+    },
+    watch: {
+      usePolling: true,
+      ignored: ['**/node_modules/**', '**/.cache/**']
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:3001',

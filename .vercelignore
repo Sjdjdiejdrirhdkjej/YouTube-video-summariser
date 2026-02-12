@@ -1,0 +1,11 @@
+node_modules
+.git
+.cache
+.config
+.local
+.upm
+.sisyphus
+*.log
+.env
+.env.local
+dist

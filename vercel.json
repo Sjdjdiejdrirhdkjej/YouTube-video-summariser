@@ -13,9 +13,5 @@
     "server/index.ts": {
       "runtime": "nodejs20.x"
     }
-  },
-  "env": {
-    "GEMINI_API_KEY": "@gemini-api-key",
-    "COHERE_API_KEY": "@cohere-api-key"
   }
 }

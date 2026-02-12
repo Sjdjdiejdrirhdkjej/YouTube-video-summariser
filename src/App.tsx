@@ -1,8 +1,8 @@
-import './App.css'
-import React from 'react'
-import { marked } from 'marked'
-import { useTheme } from './theme'
-import Changelog from './components/Changelog'
+import './App.css';
+import React from 'react';
+import { marked } from 'marked';
+import { useTheme } from './theme';
+import Changelog from './components/Changelog';
 import SharedSummary from './components/SharedSummary'
 import ChatPage from './components/ChatPage'
 
@@ -157,8 +157,10 @@ export default function App() {
       });
 
       if (!res.ok) {
+        console.error('[DEBUG] API returned error:', res.status);
         try {
           const data = await res.json();
+          console.error('[DEBUG] Error data:', data);
           if (data.credits !== undefined) setCredits(data.credits);
           if (data.retryAfter) setRetryAfter(data.retryAfter);
           setError(data.error);
@@ -171,6 +173,8 @@ export default function App() {
 
       setLoading(false);
       setStreaming(true);
+
+      console.log('[DEBUG] Starting stream processing...');
 
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
@@ -240,11 +244,13 @@ export default function App() {
               setIsThinking(true);
             }
             if (parsed.text) {
+              console.log('[DEBUG] Received text chunk:', parsed.text.length, 'chars');
               if (thinkingRef.current) {
                 setIsThinking(false);
               }
               summaryRef.current += parsed.text;
               setSummary(summaryRef.current);
+              console.log('[DEBUG] Summary length:', summaryRef.current.length);
             }
           } catch {
             // ignore parse errors
@@ -254,10 +260,12 @@ export default function App() {
 
       try { await reader.cancel(); } catch {}
       cancelAnimationFrame(animFrameRef.current);
+      console.log('[DEBUG] Stream complete. Full summary length:', summaryRef.current.length);
       setDisplayedSummary(summaryRef.current);
       displayIndexRef.current = summaryRef.current.length;
       setStreaming(false);
     } catch (err) {
+      console.error('[DEBUG] Stream error:', err);
       if ((err as Error)?.name === 'AbortError') {
         setLoading(false);
         setStreaming(false);

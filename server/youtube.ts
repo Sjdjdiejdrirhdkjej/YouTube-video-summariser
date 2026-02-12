@@ -1,4 +1,5 @@
 import { YoutubeTranscript, TranscriptResponse } from 'youtube-transcript';
+import { YouTubeTranscriptApi, EnhancedYouTubeTranscriptApi, FetchedTranscript } from '@playzone/youtube-transcript';
 
 export interface OEmbedData {
   title: string;
@@ -202,24 +203,94 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&apos;/g, "'");
 }
 
-export async function fetchTranscript(
-  videoUrl: string
-): Promise<TranscriptData> {
-  const items: TranscriptResponse[] =
-    await YoutubeTranscript.fetchTranscript(videoUrl);
-  if (!items || items.length === 0) {
-    throw new Error('Empty transcript – YouTube may have blocked the request or captions are disabled for this video');
+const INVIDIOUS_INSTANCES = [
+  'https://yewtu.be',
+  'https://invidious.fdn.fr',
+  'https://invidious.nerdvpn.de',
+  'https://inv.nadeko.net',
+];
+
+function getInvidiousUrls(): string[] {
+  const envUrls = process.env.YT_INVIDIOUS_URLS;
+  if (envUrls) {
+    return envUrls.split(',').map(s => s.trim()).filter(Boolean);
   }
+  return INVIDIOUS_INSTANCES;
+}
 
-  const text = items.map((i) => i.text).join(' ');
-  const language = items[0]?.lang ?? 'unknown';
-
+async function fetchTranscriptPlayzone(videoId: string): Promise<TranscriptData> {
+  const api = new YouTubeTranscriptApi();
+  const result: FetchedTranscript = await api.fetch(videoId, ['en']);
+  const text = result.snippets.map(s => s.text).join(' ');
+  if (!text) throw new Error('Empty transcript from playzone provider');
   return {
     available: true,
     text,
-    language,
+    language: result.languageCode || 'unknown',
+    segmentCount: result.snippets.length,
+  };
+}
+
+async function fetchTranscriptInvidious(videoId: string): Promise<TranscriptData> {
+  const invidiousUrls = getInvidiousUrls();
+  const api = new EnhancedYouTubeTranscriptApi(undefined, {
+    enabled: true,
+    instanceUrls: invidiousUrls,
+    timeout: FETCH_TIMEOUT,
+  });
+  const result = await api.fetch(videoId, ['en']);
+  const snippets = result?.snippets ?? result ?? [];
+  const text = (Array.isArray(snippets) ? snippets : []).map((s: any) => s.text).join(' ');
+  if (!text) throw new Error('Empty transcript from Invidious provider');
+  return {
+    available: true,
+    text,
+    language: result?.languageCode || 'unknown',
+    segmentCount: Array.isArray(snippets) ? snippets.length : 0,
+  };
+}
+
+async function fetchTranscriptLegacy(videoUrl: string): Promise<TranscriptData> {
+  const items: TranscriptResponse[] = await YoutubeTranscript.fetchTranscript(videoUrl);
+  if (!items || items.length === 0) {
+    throw new Error('Empty transcript from legacy provider');
+  }
+  const text = items.map((i) => i.text).join(' ');
+  return {
+    available: true,
+    text,
+    language: items[0]?.lang ?? 'unknown',
     segmentCount: items.length,
   };
+}
+
+export async function fetchTranscript(videoUrl: string): Promise<TranscriptData> {
+  const videoId = extractVideoId(videoUrl);
+  if (!videoId) throw new Error('Invalid YouTube URL');
+
+  const errors: string[] = [];
+
+  try {
+    return await fetchTranscriptPlayzone(videoId);
+  } catch (e) {
+    errors.push(`playzone: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  try {
+    return await fetchTranscriptInvidious(videoId);
+  } catch (e) {
+    errors.push(`invidious: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  try {
+    return await fetchTranscriptLegacy(videoUrl);
+  } catch (e) {
+    errors.push(`legacy: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  throw new Error(
+    'Empty transcript \u2013 YouTube may have blocked the request or captions are disabled for this video'
+  );
 }
 
 export async function fetchTopComments(videoId: string): Promise<Comment[]> {
@@ -329,9 +400,33 @@ function reasonFrom(result: PromiseSettledResult<any>): string {
 
 export function buildFusionPrompt(signals: VideoSignals): string {
   const parts: string[] = [];
+  const hasTranscript = !!signals.transcript;
+  const hasComments = signals.comments.length > 0;
+  const hasMetadata = !!signals.metadata;
+  const hasOEmbed = !!signals.oembed;
 
-  parts.push(
-    `You are summarizing a YouTube video using multiple extracted signals (no video model was used).
+  if (!hasTranscript) {
+    parts.push(
+      `You are summarizing a YouTube video using limited metadata signals (transcript is not available).
+IMPORTANT: The transcript is unavailable, so you must work with the metadata below. Even with limited information, you should still produce a useful summary.
+
+Use the video description, title, tags, and chapters (if available) to create the best possible summary.
+If the author has written a detailed description, use it to infer the video's content and key points.
+If chapters are available, use them to outline the structure of the video.
+
+Output a well-structured markdown summary:
+1. A concise overview of what the video is about (based on title, description, and tags)
+2. Key topics or themes implied from the metadata
+3. A section outline (use chapters if available, or infer sections from the description)
+4. Notable elements mentioned in the description
+
+If the description is very minimal or generic, clearly state that the available information is limited and suggest what the video likely covers based on title and tags.
+
+Here are the available signals:\n`
+    );
+  } else {
+    parts.push(
+      `You are summarizing a YouTube video using multiple extracted signals (no video model was used).
 Prefer the transcript as the primary source of content. Use metadata and chapters to structure the summary.
 If comments are present, include a brief audience sentiment section.
 Output a well-structured markdown summary with:
@@ -342,7 +437,8 @@ Output a well-structured markdown summary with:
 5. Audience sentiment (only if comments are available)
 
 Here are the signals:\n`
-  );
+    );
+  }
 
   if (signals.oembed) {
     parts.push(`## Video Info (oEmbed)`);

@@ -4,9 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Sleek minimal UI redesign** — complete visual overhaul inspired by Linear/Vercel aesthetics: clean nav with "Summa" brand, inline input row with arrow button, skeleton loading animation, ghost-style action buttons with inline SVG icons, subtle empty state, and responsive mobile layout
+
+### Changed
+
+- **Multi-provider transcript fetching with Invidious fallback** — `fetchTranscript` now tries three providers in sequence: `@playzone/youtube-transcript` (direct), Invidious proxy instances (configurable via `YT_INVIDIOUS_URLS` env var), and legacy `youtube-transcript` — significantly improving reliability when YouTube blocks server-side requests
+
 ### Fixed
 
-- **Improved Cohere API error diagnostics** — "Summary generation produced no content" now reports which signals were available vs. missing, stream event count, and a helpful hint about transcript unavailability
+- **Fallback summary now actually streams to client** — when the AI produces no content, the metadata-based fallback summary is now sent to the client via SSE instead of only being saved server-side (fixes "0 stream events received" error)
+- **Improved Cohere API error diagnostics** — "Summary generation produced no content" now reports which signals were available vs. missing, stream event count, and a helpful hint about transcript unavailability; when transcript is unavailable, error message now suggests using the standard summarize endpoint which uses a video model
+- **Better prompts for metadata-only summaries** — fusion prompt generator now explicitly handles cases where only metadata is available (no transcript), giving clearer instructions to the AI to produce useful summaries from limited information like video descriptions, title, and tags
 - **Better transcript error message** — `fetchTranscript` now explains that YouTube may have blocked the request or captions are disabled
 - **Undefined transcript language** — fixed `language` field defaulting to `undefined` when `youtube-transcript` doesn't return a `lang` property
 - **Removed noisy debug logging** — removed per-event `console.log('Cohere event:', event)` and debug SSE messages that leaked internal state to the client

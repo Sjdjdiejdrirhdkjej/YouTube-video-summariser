@@ -286,124 +286,142 @@ export default function App() {
   }
 
   return (
-    <div className="app-container">
-      <button
-        type="button"
-        className="theme-toggle-btn"
-        onClick={() => toggleTheme()}
-        aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-      >
-        {theme === 'dark' ? '☀' : '☾'}
-      </button>
-      <header className="app-header">
-        <h1>Video Summarizer</h1>
-        <p>Paste a YouTube link to get a summary</p>
-        {credits !== null && (
-          <div className="credits-display">
-            <span className="credits-badge">{credits} credits remaining</span>
-            <span className="credits-value">(${(credits * 0.01).toFixed(2)} value)</span>
-          </div>
-        )}
-      </header>
-      <main className="main-content">
-        <div className="video-input">
-          <input
-            value={videoUrl}
-            onChange={(e) => setVideoUrl(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSummarize()}
-            type="text"
-            placeholder="https://youtube.com/watch?v=..."
-            className="url-input"
-            disabled={loading || streaming || retryAfter > 0}
-          />
+    <div className="app">
+      <nav className="nav">
+        <button
+          type="button"
+          className="nav-brand"
+          onClick={() => { setVideoUrl(''); setSummary(''); setDisplayedSummary(''); setError(''); setSummaryId(null); }}
+        >
+          Summa
+        </button>
+        <div className="nav-right">
+          {credits !== null && (
+            <span className="nav-credits">{credits} credits</span>
+          )}
           <button
             type="button"
-            className="summarize-btn"
-            onClick={handleSummarize}
-            disabled={loading || streaming || retryAfter > 0}
+            className="theme-btn"
+            onClick={() => toggleTheme()}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
-            {loading ? 'Processing video…' : streaming ? 'Streaming…' : retryAfter > 0 ? `Wait ${retryAfter}s` : 'Summarize'}
+            {theme === 'dark' ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            )}
           </button>
         </div>
-        
-        <div className="sample-urls">
-          <p className="sample-urls-label">Try a sample:</p>
-          {[
-            { label: 'How AI Works', url: 'https://www.youtube.com/watch?v=aircAruvnKk' },
-            { label: 'History of the Internet', url: 'https://www.youtube.com/watch?v=9hIQjrMHTv4' },
-            { label: 'How Computers Work', url: 'https://www.youtube.com/watch?v=QZwneRb-zqA' },
-          ].map((sample) => (
-            <button
-              key={sample.url}
-              type="button"
-              className="sample-url-btn"
-              onClick={() => setVideoUrl(sample.url)}
-              disabled={loading || streaming}
-            >
-              {sample.label}
-            </button>
-          ))}
-        </div>
-        <div className="summary-output">
-          <h2>Summary</h2>
-          {loading && (
-            <div className="summary-text loading-indicator">
-              <span className="dot-pulse" />
-              Processing video…
-            </div>
+      </nav>
+
+      <div className="hero">
+        <h1 className="hero-title">Summarize any YouTube video</h1>
+        <p className="hero-sub">Paste a link and get an AI-powered summary in seconds.</p>
+      </div>
+
+      <div className="input-row">
+        <input
+          value={videoUrl}
+          onChange={(e) => setVideoUrl(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSummarize()}
+          type="text"
+          placeholder="Paste a YouTube URL..."
+          className="url-input"
+          disabled={loading || streaming || retryAfter > 0}
+        />
+        <button
+          type="button"
+          className="go-btn"
+          onClick={handleSummarize}
+          disabled={loading || streaming || retryAfter > 0}
+        >
+          {loading ? (
+            <span className="spinner" />
+          ) : streaming ? (
+            <span className="spinner" />
+          ) : retryAfter > 0 ? (
+            `${retryAfter}s`
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
           )}
-          {error && (
-            <p className="summary-text error">
-              {error}
-              {retryAfter > 0 && (
-                <span className="retry-countdown"> Retry available in {retryAfter}s</span>
-              )}
-            </p>
-          )}
-          {displayedSummary && (
+        </button>
+      </div>
+
+      <div className="samples">
+        <span className="samples-label">Try:</span>
+        {[
+          { label: 'How AI Works', url: 'https://www.youtube.com/watch?v=aircAruvnKk' },
+          { label: 'History of the Internet', url: 'https://www.youtube.com/watch?v=9hIQjrMHTv4' },
+          { label: 'How Computers Work', url: 'https://www.youtube.com/watch?v=QZwneRb-zqA' },
+        ].map((s) => (
+          <button
+            key={s.url}
+            type="button"
+            className="sample-link"
+            onClick={() => setVideoUrl(s.url)}
+            disabled={loading || streaming}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="output">
+        {error && (
+          <div className="error-banner">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            <span>{error}</span>
+            {retryAfter > 0 && <span className="retry-tag">Retry in {retryAfter}s</span>}
+          </div>
+        )}
+
+        {loading && (
+          <div className="skeleton">
+            <div className="skeleton-line w-full" />
+            <div className="skeleton-line w-3/4" />
+            <div className="skeleton-line w-5/6" />
+            <div className="skeleton-line w-2/3" />
+          </div>
+        )}
+
+        {displayedSummary && (
+          <div className="result-card">
             <div
-              className={`summary-text markdown-body${streaming ? ' streaming' : ''}`}
+              className={`prose${streaming ? ' streaming' : ''}`}
               dangerouslySetInnerHTML={{ __html: renderedHtml }}
             />
-          )}
-          {summary && !streaming && !loading && (
-            <>
-              {summaryId && (
-                <p className="summary-id">
-                  Summary ID: <code>/{summaryId}</code>
-                </p>
-              )}
-              <div className="summary-actions">
-                {summaryId && (
-                  <button
-                    type="button"
-                    className="chat-toggle-btn"
-                    onClick={() => navigate(`/${summaryId}/chat`)}
-                  >
-                    Chat about this
-                  </button>
-                )}
-                {summaryId && (
-                  <button
-                    type="button"
-                    className="share-link-btn"
-                    onClick={() => {
-                      const url = `${window.location.origin}/${summaryId}`;
-                      navigator.clipboard.writeText(url);
-                    }}
-                  >
-                    Copy share link (/{summaryId})
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-          {!loading && !streaming && !error && !displayedSummary && (
-            <p className="summary-text empty">Enter a YouTube URL above to see a summary.</p>
-          )}
-        </div>
-      </main>
-      <footer className="app-footer">
+          </div>
+        )}
+
+        {summary && !streaming && !loading && summaryId && (
+          <div className="actions">
+            <button type="button" className="action-btn primary" onClick={() => navigate(`/${summaryId}/chat`)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              Chat about this
+            </button>
+            <button
+              type="button"
+              className="action-btn"
+              onClick={() => {
+                const url = `${window.location.origin}/${summaryId}`;
+                navigator.clipboard.writeText(url);
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              Copy link
+            </button>
+          </div>
+        )}
+
+        {!loading && !streaming && !error && !displayedSummary && (
+          <div className="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" opacity="0.2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+            <p>Your summary will appear here</p>
+          </div>
+        )}
+      </div>
+
+      <footer className="footer">
         <button type="button" className="footer-link" onClick={() => navigate('/changelog')}>
           Changelog
         </button>

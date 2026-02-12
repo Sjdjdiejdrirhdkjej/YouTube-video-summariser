@@ -31,6 +31,7 @@
     "@google/generative-ai": "^0.24.1",
     "@openai/codex": "^0.98.0",
     "@playzone/youtube-transcript": "^1.0.0",
+    "@qwen-code/qwen-code": "^0.10.1",
     "@sourcegraph/amp": "^0.0.1770768480-ge56951",
     "algoliasearch": "^5.48.0",
     "codebuff": "^1.0.617",

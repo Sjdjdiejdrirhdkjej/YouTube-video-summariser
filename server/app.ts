@@ -16,11 +16,11 @@ const envPaths = [
 ];
 
 for (const envPath of envPaths) {
-  const result = dotenv.config({ path: envPath });
-  if (result.error && result.error.code !== 'ENOENT') {
-    console.warn('[env] load failed:', envPath, result.error.message);
-  }
-}
+   const result = dotenv.config({ path: envPath });
+   if (result.error) {
+     console.warn('[env] load failed:', envPath, result.error.message);
+   }
+ }
 
 const envFilePaths = process.env.ENV_FILE
   ? [path.resolve(process.env.ENV_FILE)]
@@ -362,12 +362,40 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     console.log(`Cohere stream finished: ${eventCount} events, ${fullText.length} chars of content`);
 
     if (!fullText) {
-      const missingInfo = Object.entries(signals.missing).map(([k, v]) => `${k}: ${v}`).join('; ');
-      throw new Error(
-        `Summary generation produced no content (${eventCount} stream events received). ` +
-        `Signals used: [${signalList.join(', ')}]. Missing: [${missingInfo}]. ` +
-        `This may be due to insufficient video data (e.g., no transcript available).`
-      );
+      const fallbackParts: string[] = [];
+
+      if (signals.oembed) {
+        fallbackParts.push(`**Title:** ${signals.oembed.title}`);
+        if (signals.oembed.authorName) fallbackParts.push(`**Author:** ${signals.oembed.authorName}`);
+        fallbackParts.push('');
+      }
+
+      if (signals.metadata) {
+        if (signals.metadata.description) fallbackParts.push(`**Description:** ${signals.metadata.description}`);
+        if (signals.metadata.tags && signals.metadata.tags.length) {
+          fallbackParts.push(`**Tags:** ${signals.metadata.tags.join(', ')}`);
+        }
+        if (signals.metadata.chapters && signals.metadata.chapters.length) {
+          fallbackParts.push(`**Chapters:**`);
+          for (const ch of signals.metadata.chapters) {
+            const m = Math.floor(ch.time / 60);
+            const s = ch.time % 60;
+            fallbackParts.push(`- ${m}:${s.toString().padStart(2, '0')} — ${ch.title}`);
+          }
+          fallbackParts.push('');
+        }
+      }
+
+      fallbackParts.push(`**Summary:** Unable to generate a detailed AI summary because the transcript is unavailable. ` +
+        `The video likely discusses topics inferred from the title, description, and tags above.`);
+      fallbackParts.push('');
+
+      fullText = fallbackParts.join('\n');
+
+      const chunkSize = 200;
+      for (let i = 0; i < fullText.length; i += chunkSize) {
+        if (!writeSSE({ text: fullText.slice(i, i + chunkSize) })) break;
+      }
     }
 
     savedSummaries.set(summaryId, {

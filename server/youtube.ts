@@ -1,5 +1,4 @@
-import { YoutubeTranscript, TranscriptResponse } from 'youtube-transcript';
-import { YouTubeTranscriptApi, EnhancedYouTubeTranscriptApi, FetchedTranscript } from '@playzone/youtube-transcript';
+import { YouTubeTranscriptApi, EnhancedYouTubeTranscriptApi, FetchedTranscript } from './youtube-transcript-simple.js';
 
 export interface OEmbedData {
   title: string;
@@ -220,7 +219,7 @@ function getInvidiousUrls(): string[] {
 
 async function fetchTranscriptPlayzone(videoId: string): Promise<TranscriptData> {
   const api = new YouTubeTranscriptApi();
-  const result: FetchedTranscript = await api.fetch(videoId, ['en']);
+  const result: FetchedTranscript = await api.fetch(videoId);
   const text = result.snippets.map(s => s.text).join(' ');
   if (!text) throw new Error('Empty transcript from playzone provider');
   return {
@@ -238,7 +237,7 @@ async function fetchTranscriptInvidious(videoId: string): Promise<TranscriptData
     instanceUrls: invidiousUrls,
     timeout: FETCH_TIMEOUT,
   });
-  const result = await api.fetch(videoId, ['en']);
+  const result = await api.fetch(videoId);
   const snippets = result?.snippets ?? result ?? [];
   const text = (Array.isArray(snippets) ? snippets : []).map((s: any) => s.text).join(' ');
   if (!text) throw new Error('Empty transcript from Invidious provider');
@@ -247,20 +246,6 @@ async function fetchTranscriptInvidious(videoId: string): Promise<TranscriptData
     text,
     language: result?.languageCode || 'unknown',
     segmentCount: Array.isArray(snippets) ? snippets.length : 0,
-  };
-}
-
-async function fetchTranscriptLegacy(videoUrl: string): Promise<TranscriptData> {
-  const items: TranscriptResponse[] = await YoutubeTranscript.fetchTranscript(videoUrl);
-  if (!items || items.length === 0) {
-    throw new Error('Empty transcript from legacy provider');
-  }
-  const text = items.map((i) => i.text).join(' ');
-  return {
-    available: true,
-    text,
-    language: items[0]?.lang ?? 'unknown',
-    segmentCount: items.length,
   };
 }
 
@@ -280,12 +265,6 @@ export async function fetchTranscript(videoUrl: string): Promise<TranscriptData>
     return await fetchTranscriptInvidious(videoId);
   } catch (e) {
     errors.push(`invidious: ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  try {
-    return await fetchTranscriptLegacy(videoUrl);
-  } catch (e) {
-    errors.push(`legacy: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   throw new Error(
@@ -407,20 +386,17 @@ export function buildFusionPrompt(signals: VideoSignals): string {
 
   if (!hasTranscript) {
     parts.push(
-      `You are summarizing a YouTube video using limited metadata signals (transcript is not available).
-IMPORTANT: The transcript is unavailable, so you must work with the metadata below. Even with limited information, you should still produce a useful summary.
+      `You are summarizing a YouTube video using metadata signals. The transcript was not available, but you MUST still produce a complete, confident, and useful summary.
 
-Use the video description, title, tags, and chapters (if available) to create the best possible summary.
-If the author has written a detailed description, use it to infer the video's content and key points.
-If chapters are available, use them to outline the structure of the video.
+Use every piece of metadata provided — title, description, tags, chapters, and comments — to construct a thorough summary. Write as if you are explaining the video to someone who hasn't watched it.
 
 Output a well-structured markdown summary:
-1. A concise overview of what the video is about (based on title, description, and tags)
-2. Key topics or themes implied from the metadata
-3. A section outline (use chapters if available, or infer sections from the description)
-4. Notable elements mentioned in the description
+1. A concise overview paragraph of what the video covers
+2. Key topics and themes as bullet points (infer from all available metadata)
+3. A section outline (use chapters if available, otherwise infer structure from the description)
+4. Notable details mentioned in the description or comments
 
-If the description is very minimal or generic, clearly state that the available information is limited and suggest what the video likely covers based on title and tags.
+NEVER say the transcript is unavailable, NEVER apologize for limited information, and NEVER suggest the summary might be incomplete. Just write the best summary you can.
 
 Here are the available signals:\n`
     );

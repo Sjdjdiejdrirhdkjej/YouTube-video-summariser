@@ -4,9 +4,9 @@
   "type": "module",
   "description": "React TypeScript on Replit, using Vite bundler",
   "scripts": {
-    "dev": "concurrently \"bun run dev:client\" \"bun run dev:server\"",
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
     "dev:client": "vite",
-    "dev:server": "bun run server/index.ts",
+    "dev:server": "node --import tsx/esm server/index.ts",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
@@ -30,7 +30,6 @@
     "@google/genai": "^1.40.0",
     "@google/generative-ai": "^0.24.1",
     "@openai/codex": "^0.98.0",
-    "@playzone/youtube-transcript": "^1.0.0",
     "@qwen-code/qwen-code": "^0.10.1",
     "@sourcegraph/amp": "^0.0.1770768480-ge56951",
     "algoliasearch": "^5.48.0",
@@ -40,6 +39,7 @@
     "dotenv": "^17.2.4",
     "drizzle-zod": "^0.8.3",
     "express": "^5.2.1",
+    "html-entities": "^2.6.0",
     "marked": "^17.0.1",
     "openai": "^6.21.0",
     "opencode-ai": "^1.1.56",
@@ -47,7 +47,6 @@
     "p-retry": "^7.1.1",
     "react-instantsearch": "^7.23.2",
     "vercel": "^50.15.1",
-    "youtube-transcript": "^1.2.1",
     "zod": "^3.25.76",
     "zod-validation-error": "^5.0.0"
   }

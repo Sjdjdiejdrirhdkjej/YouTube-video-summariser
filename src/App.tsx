@@ -28,8 +28,12 @@ export default function App() {
   const [streaming, setStreaming] = React.useState(false);
   const [error, setError] = React.useState('');
   const [retryAfter, setRetryAfter] = React.useState(0);
+  const analysisMode = 'hybrid';
   const [summaryId, setSummaryId] = React.useState<string | null>(null);
   const [targetSummaryId, setTargetSummaryId] = React.useState<string | null>(null);
+  const [thinkingText, setThinkingText] = React.useState('');
+  const [isThinking, setIsThinking] = React.useState(false);
+  const thinkingRef = React.useRef('');
   const summaryRef = React.useRef('');
   const animFrameRef = React.useRef(0);
   const displayIndexRef = React.useRef(0);
@@ -134,6 +138,9 @@ export default function App() {
     setDisplayedSummary('');
     setSummaryId(null);
     setTargetSummaryId(null);
+    setThinkingText('');
+    setIsThinking(false);
+    thinkingRef.current = '';
     summaryRef.current = '';
     displayIndexRef.current = 0;
     cancelAnimationFrame(animFrameRef.current);
@@ -145,7 +152,7 @@ export default function App() {
       const res = await fetch('/api/summarize-hybrid', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Fingerprint': fingerprint },
-        body: JSON.stringify({ videoUrl: videoUrl.trim() }),
+        body: JSON.stringify({ videoUrl: videoUrl.trim(), analysisMode }),
         signal: abortController.signal,
       });
 
@@ -228,7 +235,15 @@ export default function App() {
               setSummaryId(parsed.summaryId);
               setTargetSummaryId(parsed.summaryId);
             }
+            if (parsed.thinking) {
+              thinkingRef.current += parsed.thinking;
+              setThinkingText(thinkingRef.current);
+              setIsThinking(true);
+            }
             if (parsed.text) {
+              if (thinkingRef.current) {
+                setIsThinking(false);
+              }
               summaryRef.current += parsed.text;
               setSummary(summaryRef.current);
             }
@@ -381,6 +396,17 @@ export default function App() {
             <div className="skeleton-line w-3/4" />
             <div className="skeleton-line w-5/6" />
             <div className="skeleton-line w-2/3" />
+          </div>
+        )}
+
+        {(isThinking || thinkingText) && (
+          <div className="thinking-panel">
+            <div className="thinking-header">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span>{isThinking ? 'Thinking...' : 'Thought process'}</span>
+              {isThinking && <span className="thinking-spinner" />}
+            </div>
+            <pre className="thinking-content">{thinkingText}</pre>
           </div>
         )}
 

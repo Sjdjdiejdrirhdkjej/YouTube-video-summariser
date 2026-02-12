@@ -270,7 +270,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       res.status(400).json({ error: 'Missing fingerprint header.' });
       return;
     }
-    if (!deductCredits(fp, 3)) {
+    if (!deductCredits(fp, 5)) {
       res.status(403).json({ error: 'No credits remaining. Each device gets 500 free credits.', credits: getCredits(fp) });
       return;
     }
@@ -285,9 +285,9 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       return;
     }
 
-    if (!COHERE_API_KEY) {
+    if (!GEMINI_API_KEY && !COHERE_API_KEY) {
       res.status(500).json({
-        error: 'Hybrid summarization is not configured. Set COHERE_API_KEY.',
+        error: 'Summarization is not configured. Set GEMINI_API_KEY and/or COHERE_API_KEY.',
       });
       return;
     }
@@ -312,90 +312,193 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       return true;
     };
 
-    writeSSE({ text: 'Fetching video information...' });
+    writeSSE({ text: 'Analyzing video with multiple strategies...\n' });
 
-    const signals = await gatherSignals(videoUrl);
-    const prompt = buildFusionPrompt(signals);
+    const geminiVideoAnalysis = async (): Promise<string | null> => {
+      if (!GEMINI_API_KEY) return null;
+      try {
+        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+        const result = await ai.models.generateContent({
+          model: 'gemini-2.0-flash-exp',
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { fileData: { fileUri: videoUrl } },
+                {
+                  text: 'Analyze this video thoroughly. Describe the visual content, key scenes, on-screen text, speaker expressions, demonstrations, and audio/speech content. Provide a detailed structured summary with key takeaways. Use markdown formatting.',
+                },
+              ],
+            },
+          ],
+        });
+        const text = result.text ?? '';
+        return text || null;
+      } catch (e) {
+        console.warn('Gemini video analysis failed:', e instanceof Error ? e.message : String(e));
+        return null;
+      }
+    };
 
-    const signalList = [
-      signals.transcript ? 'transcript' : null,
-      signals.oembed ? 'metadata' : null,
-      signals.metadata?.chapters?.length ? 'chapters' : null,
-      signals.comments.length ? 'comments' : null,
-    ].filter(Boolean);
+    const textSignalAnalysis = async (): Promise<{ text: string | null; signalList: string[] }> => {
+      try {
+        const signals = await gatherSignals(videoUrl);
 
-    if (signalList.length === 0) {
-      throw new Error(
-        'Could not retrieve any usable signals from this video. ' +
-        Object.entries(signals.missing).map(([k, v]) => `${k}: ${v}`).join('; ')
-      );
+        const signalList = [
+          signals.transcript ? 'transcript' : null,
+          signals.oembed ? 'metadata' : null,
+          signals.metadata?.chapters?.length ? 'chapters' : null,
+          signals.comments.length ? 'comments' : null,
+        ].filter(Boolean) as string[];
+
+        if (signalList.length === 0) return { text: null, signalList: [] };
+
+        if (!COHERE_API_KEY) {
+          const metaParts: string[] = [];
+          if (signals.oembed) metaParts.push(`**${signals.oembed.title}** by ${signals.oembed.authorName}`);
+          if (signals.metadata?.description) metaParts.push(signals.metadata.description);
+          if (signals.transcript) metaParts.push(`Transcript: ${signals.transcript.text.slice(0, 5000)}`);
+          return { text: metaParts.join('\n\n') || null, signalList };
+        }
+
+        const prompt = buildFusionPrompt(signals);
+        const cohere = new CohereClientV2({ token: COHERE_API_KEY });
+        const stream = await cohere.chatStream({
+          model: 'command-a-reasoning-08-2025',
+          messages: [{ role: 'user', content: prompt }],
+          thinking: { type: 'enabled', tokenBudget: 4096 },
+        });
+
+        let result = '';
+        for await (const event of stream) {
+          if (event.type === 'content-delta') {
+            const thinking = event.delta?.message?.content?.thinking;
+            if (thinking) {
+              writeSSE({ thinking, source: 'text-analysis' });
+            }
+            const t = event.delta?.message?.content?.text;
+            if (t) result += t;
+          }
+        }
+
+        return { text: result || null, signalList };
+      } catch (e) {
+        console.warn('Text signal analysis failed:', e instanceof Error ? e.message : String(e));
+        return { text: null, signalList: [] };
+      }
+    };
+
+    writeSSE({ text: 'Running video AI analysis and transcript extraction in parallel...\n' });
+
+    const [geminiResult, textResult] = await Promise.all([
+      geminiVideoAnalysis(),
+      textSignalAnalysis(),
+    ]);
+
+    if (abortController.signal.aborted) {
+      if (!res.writableEnded) res.end();
+      return;
     }
 
-    writeSSE({ text: `*Summarizing using: ${signalList.join(', ')}*\n\n---\n\n` });
+    const methods: string[] = [];
+    if (geminiResult) methods.push('video AI');
+    if (textResult.text) methods.push(...textResult.signalList);
 
-    const cohere = new CohereClientV2({ token: COHERE_API_KEY });
+    if (methods.length === 0) {
+      throw new Error('Could not analyze the video with any method. The video may be unavailable or restricted.');
+    }
 
-    const stream = await cohere.chatStream({
-      model: 'command-a-03-2025',
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    });
+    writeSSE({ text: `*Analysis methods: ${methods.join(', ')}*\n\n` });
 
-    let eventCount = 0;
-    for await (const event of stream) {
-      if (abortController.signal.aborted) break;
+    if (geminiResult && textResult.text) {
+      writeSSE({ text: 'Reasoning to synthesize both analyses...\n\n---\n\n' });
 
-      if (event.type === 'content-delta') {
-        const text = event.delta?.message?.content?.text;
+      const fusionPrompt = `You have two independent analyses of the same YouTube video produced by different methods.
+
+**Analysis 1 — Video/Audio AI Analysis (from visual and audio processing):**
+${geminiResult}
+
+**Analysis 2 — Transcript & Metadata Analysis (from text signals):**
+${textResult.text}
+
+Synthesize these into a single comprehensive markdown summary. Combine unique insights from both analyses and remove redundancy. Structure it as:
+1. A concise overview paragraph
+2. Key takeaways as bullet points
+3. Section-by-section outline
+4. Notable quotes or visual details
+5. Audience sentiment (if comment data was available)`;
+
+      if (COHERE_API_KEY) {
+        const cohere = new CohereClientV2({ token: COHERE_API_KEY });
+        const fusionStream = await cohere.chatStream({
+          model: 'command-a-reasoning-08-2025',
+          messages: [{ role: 'user', content: fusionPrompt }],
+          thinking: { type: 'enabled', tokenBudget: 8192 },
+        });
+        for await (const event of fusionStream) {
+          if (abortController.signal.aborted) break;
+          if (event.type === 'content-delta') {
+            const thinking = event.delta?.message?.content?.thinking;
+            if (thinking) {
+              if (!writeSSE({ thinking })) break;
+            }
+            const text = event.delta?.message?.content?.text;
+            if (text) {
+              fullText += text;
+              if (!writeSSE({ text })) break;
+            }
+          }
+        }
+      } else if (GEMINI_API_KEY) {
+        const fusionAi = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+        const fusionStream = await fusionAi.models.generateContentStream({
+          model: 'gemini-2.0-flash-exp',
+          contents: [{ role: 'user', parts: [{ text: fusionPrompt }] }],
+        });
+        for await (const chunk of fusionStream) {
+          if (abortController.signal.aborted) break;
+          const text = chunk.text;
+          if (text) {
+            fullText += text;
+            if (!writeSSE({ text })) break;
+          }
+        }
+      }
+    } else if (geminiResult) {
+      const chunkSize = 200;
+      for (let i = 0; i < geminiResult.length; i += chunkSize) {
+        if (abortController.signal.aborted) break;
+        const chunk = geminiResult.slice(i, i + chunkSize);
+        fullText += chunk;
+        if (!writeSSE({ text: chunk })) break;
+      }
+    } else if (textResult.text && GEMINI_API_KEY) {
+      const rewritePrompt = `Rewrite this video analysis into a clean, well-structured markdown summary with an overview, key takeaways, and section outline:\n\n${textResult.text}`;
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+      const rewriteStream = await ai.models.generateContentStream({
+        model: 'gemini-2.0-flash-exp',
+        contents: [{ role: 'user', parts: [{ text: rewritePrompt }] }],
+      });
+      for await (const chunk of rewriteStream) {
+        if (abortController.signal.aborted) break;
+        const text = chunk.text;
         if (text) {
           fullText += text;
           if (!writeSSE({ text })) break;
         }
       }
-      eventCount++;
+    } else if (textResult.text) {
+      const chunkSize = 200;
+      for (let i = 0; i < textResult.text.length; i += chunkSize) {
+        if (abortController.signal.aborted) break;
+        const chunk = textResult.text.slice(i, i + chunkSize);
+        fullText += chunk;
+        if (!writeSSE({ text: chunk })) break;
+      }
     }
 
-    console.log(`Cohere stream finished: ${eventCount} events, ${fullText.length} chars of content`);
-
     if (!fullText) {
-      const fallbackParts: string[] = [];
-
-      if (signals.oembed) {
-        fallbackParts.push(`**Title:** ${signals.oembed.title}`);
-        if (signals.oembed.authorName) fallbackParts.push(`**Author:** ${signals.oembed.authorName}`);
-        fallbackParts.push('');
-      }
-
-      if (signals.metadata) {
-        if (signals.metadata.description) fallbackParts.push(`**Description:** ${signals.metadata.description}`);
-        if (signals.metadata.tags && signals.metadata.tags.length) {
-          fallbackParts.push(`**Tags:** ${signals.metadata.tags.join(', ')}`);
-        }
-        if (signals.metadata.chapters && signals.metadata.chapters.length) {
-          fallbackParts.push(`**Chapters:**`);
-          for (const ch of signals.metadata.chapters) {
-            const m = Math.floor(ch.time / 60);
-            const s = ch.time % 60;
-            fallbackParts.push(`- ${m}:${s.toString().padStart(2, '0')} — ${ch.title}`);
-          }
-          fallbackParts.push('');
-        }
-      }
-
-      fallbackParts.push(`**Summary:** Unable to generate a detailed AI summary because the transcript is unavailable. ` +
-        `The video likely discusses topics inferred from the title, description, and tags above.`);
-      fallbackParts.push('');
-
-      fullText = fallbackParts.join('\n');
-
-      const chunkSize = 200;
-      for (let i = 0; i < fullText.length; i += chunkSize) {
-        if (!writeSSE({ text: fullText.slice(i, i + chunkSize) })) break;
-      }
+      throw new Error('Summary generation produced no content.');
     }
 
     savedSummaries.set(summaryId, {
@@ -422,7 +525,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     let message = err instanceof Error ? err.message : String(err);
 
     if (message.includes('Network error') || message.includes('ENOTFOUND') || message.includes('ECONNREFUSED')) {
-      message = 'Network error accessing YouTube. Please try a different video or use the standard summarize endpoint.';
+      message = 'Network error accessing YouTube. Please try a different video.';
     }
 
     if (!res.headersSent) {
@@ -496,14 +599,19 @@ app.post('/api/chat', async (req, res) => {
     ];
 
     const stream = await cohere.chatStream({
-      model: 'command-a-03-2025',
+      model: 'command-a-reasoning-08-2025',
       messages: cohereMessages,
+      thinking: { type: 'enabled', tokenBudget: 4096 },
     });
 
     let fullResponse = '';
     for await (const event of stream) {
       if (abortController.signal.aborted) break;
       if (event.type === 'content-delta') {
+        const thinking = event.delta?.message?.content?.thinking;
+        if (thinking) {
+          if (!writeSSE({ thinking })) break;
+        }
         const text = event.delta?.message?.content?.text;
         if (text) {
           fullResponse += text;

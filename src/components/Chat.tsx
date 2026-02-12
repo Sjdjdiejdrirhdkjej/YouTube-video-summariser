@@ -18,6 +18,9 @@ export default function Chat({ summary, videoUrl, onClose }: ChatProps) {
   const [streaming, setStreaming] = React.useState(false);
   const [retryAfter, setRetryAfter] = React.useState(0);
   const [chatId, setChatId] = React.useState<string | null>(null);
+  const [thinkingText, setThinkingText] = React.useState('');
+  const [isThinking, setIsThinking] = React.useState(false);
+  const thinkingRef = React.useRef('');
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const assistantRef = React.useRef('');
   const abortRef = React.useRef<AbortController | null>(null);
@@ -43,14 +46,19 @@ export default function Chat({ summary, videoUrl, onClose }: ChatProps) {
     if (!text || streaming) return;
 
     const userMessage: Message = { role: 'user', content: text };
-    const history = [...messages, userMessage];
-    setMessages(history);
+    const updateMessages = (updater: (prev: Message[]) => Message[]) => {
+      setMessages(prev => updater(prev));
+    };
+
+    updateMessages(prev => [...prev, userMessage]);
     setInput('');
     setStreaming(true);
     assistantRef.current = '';
+    thinkingRef.current = '';
+    setThinkingText('');
+    setIsThinking(false);
 
-    const assistantMessage: Message = { role: 'assistant', content: '' };
-    setMessages([...history, assistantMessage]);
+    updateMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
     try {
       const abortController = new AbortController();
@@ -81,7 +89,11 @@ export default function Chat({ summary, videoUrl, onClose }: ChatProps) {
         } catch {
           assistantRef.current = `Request failed (${res.status})`;
         }
-        setMessages([...history, { role: 'assistant', content: assistantRef.current }]);
+        updateMessages(prev => {
+          const newMessages = [...prev];
+          newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
+          return newMessages;
+        });
         setStreaming(false);
         return;
       }
@@ -125,7 +137,11 @@ export default function Chat({ summary, videoUrl, onClose }: ChatProps) {
             if (parsed.error) {
               if (parsed.retryAfter) setRetryAfter(parsed.retryAfter);
               assistantRef.current = parsed.error;
-              setMessages([...history, { role: 'assistant', content: assistantRef.current }]);
+              updateMessages(prev => {
+                const newMessages = [...prev];
+                newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
+                return newMessages;
+              });
               stopped = true;
               break;
             }
@@ -135,9 +151,21 @@ export default function Chat({ summary, videoUrl, onClose }: ChatProps) {
             if (parsed.chatId) {
               setChatId(parsed.chatId);
             }
+            if (parsed.thinking) {
+              thinkingRef.current += parsed.thinking;
+              setThinkingText(thinkingRef.current);
+              setIsThinking(true);
+            }
             if (parsed.text) {
+              if (thinkingRef.current) {
+                setIsThinking(false);
+              }
               assistantRef.current += parsed.text;
-              setMessages([...history, { role: 'assistant', content: assistantRef.current }]);
+              updateMessages(prev => {
+                const newMessages = [...prev];
+                newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
+                return newMessages;
+              });
             }
           } catch {}
         }
@@ -150,8 +178,13 @@ export default function Chat({ summary, videoUrl, onClose }: ChatProps) {
         return;
       }
       assistantRef.current = `Error: ${err instanceof Error ? err.message : String(err)}`;
-      setMessages([...messages, userMessage, { role: 'assistant', content: assistantRef.current }]);
+      updateMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
+        return newMessages;
+      });
     }
+    setThinkingText('');
     setStreaming(false);
   };
 
@@ -193,6 +226,16 @@ export default function Chat({ summary, videoUrl, onClose }: ChatProps) {
             )}
           </div>
         ))}
+        {(isThinking || (thinkingText && streaming)) && (
+          <div className="thinking-panel compact">
+            <div className="thinking-header">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span>{isThinking ? 'Thinking...' : 'Thought process'}</span>
+              {isThinking && <span className="thinking-spinner" />}
+            </div>
+            <pre className="thinking-content">{thinkingText}</pre>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
       <div className="chat-input-area">

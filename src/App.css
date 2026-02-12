@@ -4,6 +4,17 @@
 *::before,
 *::after {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+button,
+input,
+[role="button"] {
+  touch-action: manipulation;
 }
 
 body {
@@ -226,6 +237,60 @@ body {
 .sample-link:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* Thinking Panel */
+.thinking-panel {
+  margin-bottom: 16px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  overflow: hidden;
+  animation: fadeIn 0.2s ease;
+}
+
+.thinking-panel.compact {
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-primary-light);
+}
+
+.thinking-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--color-primary-light);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-left: auto;
+}
+
+.thinking-content {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 /* Output */
@@ -1084,13 +1149,23 @@ body {
 }
 
 /* Responsive */
-@media (max-width: 480px) {
+@media (max-width: 640px) {
+  .app {
+    padding: 0 16px;
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  .hero {
+    padding: 24px 0 20px;
+  }
+
   .hero-title {
     font-size: 1.5rem;
   }
 
-  .hero {
-    padding: 32px 0 28px;
+  .hero-sub {
+    font-size: 0.8125rem;
   }
 
   .input-row {
@@ -1099,10 +1174,224 @@ body {
 
   .go-btn {
     width: 100%;
-    height: 40px;
+    height: 44px;
+  }
+
+  .url-input {
+    font-size: 16px;
+  }
+
+  .samples {
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .result-card {
+    padding: 0;
+  }
+
+  .prose {
+    font-size: 0.875rem;
   }
 
   .actions {
     flex-direction: column;
+  }
+
+  .action-btn {
+    justify-content: center;
+  }
+
+  .empty-state {
+    padding: 40px 0;
+  }
+
+  .chat-panel {
+    height: 380px;
+  }
+
+  .chat-page-panel {
+    height: 380px;
+  }
+
+  .chat-messages {
+    padding: 12px;
+  }
+
+  .chat-input-area {
+    padding: 10px 12px;
+  }
+
+  .chat-message {
+    max-width: 90%;
+  }
+
+  .app-container {
+    padding: 20px 16px 60px;
+  }
+
+  .main-content {
+    padding: 16px;
+  }
+
+  .markdown-body {
+    font-size: 0.875rem;
+  }
+
+  .changelog-page {
+    padding: 24px 16px 60px;
+  }
+
+  .shared-video-link {
+    word-break: break-all;
+    font-size: 0.75rem;
+  }
+
+  .thinking-content {
+    max-height: 150px;
+    font-size: 0.65rem;
+  }
+
+  .thinking-header {
+    font-size: 0.6875rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .app {
+    padding: 0 10px;
+  }
+
+  .hero {
+    padding: 16px 0 14px;
+  }
+
+  .hero-title {
+    font-size: 1.375rem;
+  }
+
+  .hero-sub {
+    font-size: 0.75rem;
+  }
+
+  .nav {
+    padding: 12px 0;
+  }
+
+  .nav-brand {
+    font-size: 1rem;
+  }
+
+  .prose h1 { font-size: 1.2rem; }
+  .prose h2 { font-size: 1.05rem; }
+  .prose h3 { font-size: 0.95rem; }
+
+  .chat-panel {
+    height: 350px;
+  }
+
+  .chat-page-panel {
+    height: 350px;
+  }
+
+  .chat-message {
+    font-size: 0.75rem;
+  }
+
+  .app-container {
+    padding: 16px 10px 48px;
+  }
+
+  .main-content {
+    padding: 12px;
+  }
+
+  .footer {
+    padding: 20px 0;
+  }
+
+  .markdown-body {
+    font-size: 0.8125rem;
+  }
+
+  .thinking-panel {
+    margin-bottom: 8px;
+  }
+
+  .thinking-content {
+    max-height: 100px;
+    font-size: 0.6rem;
+    padding: 6px 8px;
+  }
+
+  .thinking-header {
+    padding: 5px 8px;
+    font-size: 0.625rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .hero-title {
+    font-size: 1.25rem;
+  }
+
+  .nav-brand {
+    font-size: 0.9375rem;
+  }
+
+  .nav-credits {
+    font-size: 0.625rem;
+  }
+
+  .sample-link {
+    font-size: 0.625rem;
+  }
+
+  .go-btn {
+    height: 40px;
+  }
+
+  .url-input {
+    padding: 10px 12px;
+  }
+
+  .chat-panel {
+    height: 320px;
+  }
+
+  .chat-page-panel {
+    height: 320px;
+  }
+
+  .chat-input {
+    font-size: 0.75rem;
+    padding: 8px 10px;
+  }
+
+  .chat-send-btn {
+    padding: 8px 12px;
+    font-size: 0.75rem;
+  }
+
+  .app-container {
+    padding: 12px 8px 40px;
+  }
+
+  .main-content {
+    padding: 10px;
+  }
+}
+
+@supports (padding: env(safe-area-inset-bottom)) {
+  .app {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .chat-input-area {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .footer {
+    padding-bottom: calc(32px + env(safe-area-inset-bottom));
   }
 }

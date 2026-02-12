@@ -4,8 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Mobile responsiveness overhaul** — improved touch-friendly styles (tap highlight, text-size-adjust, touch-action), enhanced 640px/480px/360px breakpoints with better spacing, font sizing, and layout stacking, and added safe-area inset support for notched phones
+
 ### Added
 
+- **Live AI thought process** — the reasoning model's internal thinking is now streamed live to the UI during video analysis, fusion, and chat. Displayed in a collapsible panel with monospace text, auto-scrolling, and a pulsing indicator while active.
+- **True hybrid video analysis** — runs Gemini video AI and transcript extraction in parallel, then fuses results using Cohere Command A Reasoning (`command-a-reasoning-08-2025`) with an 8K thinking token budget. Chat also uses the same reasoning model (4K budget). Falls back to Gemini if Cohere is unavailable.
 - **Sleek minimal UI redesign** — complete visual overhaul inspired by Linear/Vercel aesthetics: clean nav with "Summa" brand, inline input row with arrow button, skeleton loading animation, ghost-style action buttons with inline SVG icons, subtle empty state, and responsive mobile layout
 
 ### Changed
@@ -14,6 +20,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Thinking panel no longer flickers** — fixed `isThinking` toggling rapidly when backend interleaves progress text events with thinking tokens; now only transitions to "done" once actual thinking content has been received and text starts arriving
+- **Thinking panel added to ChatPage** — the standalone chat page (`ChatPage.tsx`) now renders the AI thinking panel, matching the behavior of the main summarizer and inline chat components
+- **Mobile optimization** — comprehensive responsive breakpoints at 640px, 480px, and 360px for typography, layout, chat panels, thinking panels, and touch targets; prevents iOS zoom on input focus
 - **Fallback summary now actually streams to client** — when the AI produces no content, the metadata-based fallback summary is now sent to the client via SSE instead of only being saved server-side (fixes "0 stream events received" error)
 - **Improved Cohere API error diagnostics** — "Summary generation produced no content" now reports which signals were available vs. missing, stream event count, and a helpful hint about transcript unavailability; when transcript is unavailable, error message now suggests using the standard summarize endpoint which uses a video model
 - **Better prompts for metadata-only summaries** — fusion prompt generator now explicitly handles cases where only metadata is available (no transcript), giving clearer instructions to the AI to produce useful summaries from limited information like video descriptions, title, and tags

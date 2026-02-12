@@ -1,4 +1,4 @@
-run = "npm run dev"
+run = "bun run server/index.ts & npx vite --host 0.0.0.0 --port 5000 & wait"
 modules = ["nodejs-20"]
 hidden = [".config", "tsconfig.json", "tsconfig.node.json", "vite.config.js", ".gitignore"]
 entrypoint = "src/App.tsx"
@@ -20,73 +20,16 @@ externalPort = 3003
 
 [[ports]]
 localPort = 5000
-
-[[ports]]
-localPort = 5173
 externalPort = 80
 
 [[ports]]
-localPort = 5174
+localPort = 5173
 externalPort = 3000
 
 [[ports]]
-localPort = 5175
+localPort = 5174
 externalPort = 3001
-
-[[ports]]
-localPort = 5176
-externalPort = 3002
-
-[[ports]]
-localPort = 5177
-externalPort = 4200
-
-[[ports]]
-localPort = 8080
-externalPort = 8080
-exposeLocalhost = true
-
-[[ports]]
-localPort = 9999
-externalPort = 5000
 
 [agent]
 expertMode = true
 integrations = ["javascript_openai_ai_integrations:2.0.0"]
-
-[workflows]
-runButton = "Project"
-
-[[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "webview"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Backend Server"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Frontend Server"
-
-[[workflows.workflow]]
-name = "Backend Server"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bun run server/index.ts"
-waitForPort = 3001
-
-[[workflows.workflow]]
-name = "Frontend Server"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npx vite --host 0.0.0.0 --port 5000"
-waitForPort = 5000

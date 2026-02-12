@@ -14,6 +14,12 @@
 - Group entries under `[Unreleased]` until a version is cut.
 - The changelog is publicly visible at the `/changelog` route in the app (served via `GET /api/changelog`), so keep entries clear and user-friendly.
 
+## Git Workflow
+
+- **Always commit and push** after every change is made.
+- Use clear, concise commit messages describing what was changed.
+- Run `git add -A && git commit -m "<message>" && git push` after completing each change.
+
 ## Code Style Guidelines
 
 ### Imports

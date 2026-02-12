@@ -79,6 +79,8 @@ export function registerChatRoutes(app: Express): void {
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+      (res as any).flush?.();
 
       // Stream response from OpenAI
       const stream = await openai.chat.completions.create({
@@ -95,6 +97,7 @@ export function registerChatRoutes(app: Express): void {
         if (content) {
           fullResponse += content;
           res.write(`data: ${JSON.stringify({ content })}\n\n`);
+          (res as any).flush?.();
         }
       }
 
@@ -102,6 +105,7 @@ export function registerChatRoutes(app: Express): void {
       await chatStorage.createMessage(conversationId, "assistant", fullResponse);
 
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      (res as any).flush?.();
       res.end();
     } catch (error) {
       console.error("Error sending message:", error);

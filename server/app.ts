@@ -187,7 +187,9 @@ app.post('/api/summarize', async (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
     res.write(': ok\n\n');
+    (res as any).flush?.();
     res.write(`data: ${JSON.stringify({ credits: getCredits(fp) })}\n\n`);
+    (res as any).flush?.();
 
     const abortController = new AbortController();
     req.on('close', () => abortController.abort());
@@ -195,6 +197,7 @@ app.post('/api/summarize', async (req, res) => {
     const writeSSE = (obj: unknown): boolean => {
       if (res.writableEnded || abortController.signal.aborted) return false;
       res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      (res as any).flush?.(); // Flush for Vercel streaming
       return true;
     };
 
@@ -301,7 +304,9 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
     res.write(': ok\n\n');
+    (res as any).flush?.();
     res.write(`data: ${JSON.stringify({ credits: getCredits(fp) })}\n\n`);
+    (res as any).flush?.();
 
     const abortController = new AbortController();
     req.on('close', () => abortController.abort());
@@ -309,6 +314,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     const writeSSE = (obj: unknown): boolean => {
       if (res.writableEnded || abortController.signal.aborted) return false;
       res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      (res as any).flush?.();
       return true;
     };
 
@@ -463,7 +469,9 @@ app.post('/api/chat', async (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
     res.write(': ok\n\n');
+    (res as any).flush?.();
     res.write(`data: ${JSON.stringify({ credits: getCredits(fp) })}\n\n`);
+    (res as any).flush?.();
 
     const abortController = new AbortController();
     req.on('close', () => abortController.abort());
@@ -471,6 +479,7 @@ app.post('/api/chat', async (req, res) => {
     const writeSSE = (obj: unknown): boolean => {
       if (res.writableEnded || abortController.signal.aborted) return false;
       res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      (res as any).flush?.();
       return true;
     };
 
@@ -591,6 +600,7 @@ app.get('/api/summary/:id', (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
   res.write(': ok\n\n');
+  (res as any).flush?.();
 
   const abortController = new AbortController();
   req.on('close', () => abortController.abort());
@@ -598,6 +608,7 @@ app.get('/api/summary/:id', (req, res) => {
   const writeSSE = (obj: unknown): boolean => {
     if (res.writableEnded || abortController.signal.aborted) return false;
     res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    (res as any).flush?.();
     return true;
   };
 

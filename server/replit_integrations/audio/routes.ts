@@ -90,8 +90,11 @@ export function registerAudioRoutes(app: Express): void {
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+      (res as any).flush?.();
 
       res.write(`data: ${JSON.stringify({ type: "user_transcript", data: userTranscript })}\n\n`);
+      (res as any).flush?.();
 
       // 6. Stream audio response from gpt-audio
       const stream = await openai.chat.completions.create({
@@ -111,10 +114,12 @@ export function registerAudioRoutes(app: Express): void {
         if (delta?.audio?.transcript) {
           assistantTranscript += delta.audio.transcript;
           res.write(`data: ${JSON.stringify({ type: "transcript", data: delta.audio.transcript })}\n\n`);
+          (res as any).flush?.();
         }
 
         if (delta?.audio?.data) {
           res.write(`data: ${JSON.stringify({ type: "audio", data: delta.audio.data })}\n\n`);
+          (res as any).flush?.();
         }
       }
 
@@ -122,6 +127,7 @@ export function registerAudioRoutes(app: Express): void {
       await chatStorage.createMessage(conversationId, "assistant", assistantTranscript);
 
       res.write(`data: ${JSON.stringify({ type: "done", transcript: assistantTranscript })}\n\n`);
+      (res as any).flush?.();
       res.end();
     } catch (error) {
       console.error("Error processing voice message:", error);

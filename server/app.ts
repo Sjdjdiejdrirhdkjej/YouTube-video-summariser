@@ -465,35 +465,87 @@ Synthesize these into a single comprehensive markdown summary. Combine unique in
         }
       }
     } else if (geminiResult) {
-      const chunkSize = 200;
-      for (let i = 0; i < geminiResult.length; i += chunkSize) {
-        if (abortController.signal.aborted) break;
-        const chunk = geminiResult.slice(i, i + chunkSize);
-        fullText += chunk;
-        if (!writeSSE({ text: chunk })) break;
-      }
-    } else if (textResult.text && GEMINI_API_KEY) {
-      const rewritePrompt = `Rewrite this video analysis into a clean, well-structured markdown summary with an overview, key takeaways, and section outline:\n\n${textResult.text}`;
-      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-      const rewriteStream = await ai.models.generateContentStream({
-        model: 'gemini-2.0-flash-exp',
-        contents: [{ role: 'user', parts: [{ text: rewritePrompt }] }],
-      });
-      for await (const chunk of rewriteStream) {
-        if (abortController.signal.aborted) break;
-        const text = chunk.text;
-        if (text) {
-          fullText += text;
-          if (!writeSSE({ text })) break;
+      const singleSource = geminiResult;
+      if (COHERE_API_KEY) {
+        writeSSE({ text: 'Reasoning to refine analysis...\n\n---\n\n' });
+        const rewritePrompt = `You have a video analysis. Rewrite it into a clean, well-structured markdown summary with:\n1. A concise overview paragraph\n2. Key takeaways as bullet points\n3. Section-by-section outline\n4. Notable quotes or visual details\n\n**Video Analysis:**\n${singleSource}`;
+        const cohere = new CohereClientV2({ token: COHERE_API_KEY });
+        const rewriteStream = await cohere.chatStream({
+          model: 'command-a-reasoning-08-2025',
+          messages: [{ role: 'user', content: rewritePrompt }],
+          thinking: { type: 'enabled', tokenBudget: 4096 },
+        });
+        for await (const event of rewriteStream) {
+          if (abortController.signal.aborted) break;
+          if (event.type === 'content-delta') {
+            const thinking = event.delta?.message?.content?.thinking;
+            if (thinking) {
+              if (!writeSSE({ thinking })) break;
+            }
+            const text = event.delta?.message?.content?.text;
+            if (text) {
+              fullText += text;
+              if (!writeSSE({ text })) break;
+            }
+          }
+        }
+      } else {
+        const chunkSize = 200;
+        for (let i = 0; i < singleSource.length; i += chunkSize) {
+          if (abortController.signal.aborted) break;
+          const chunk = singleSource.slice(i, i + chunkSize);
+          fullText += chunk;
+          if (!writeSSE({ text: chunk })) break;
         }
       }
     } else if (textResult.text) {
-      const chunkSize = 200;
-      for (let i = 0; i < textResult.text.length; i += chunkSize) {
-        if (abortController.signal.aborted) break;
-        const chunk = textResult.text.slice(i, i + chunkSize);
-        fullText += chunk;
-        if (!writeSSE({ text: chunk })) break;
+      const singleSource = textResult.text;
+      if (COHERE_API_KEY) {
+        writeSSE({ text: 'Reasoning to refine analysis...\n\n---\n\n' });
+        const rewritePrompt = `You have a video analysis from transcript and metadata. Rewrite it into a clean, well-structured markdown summary with:\n1. A concise overview paragraph\n2. Key takeaways as bullet points\n3. Section-by-section outline\n\n**Video Analysis:**\n${singleSource}`;
+        const cohere = new CohereClientV2({ token: COHERE_API_KEY });
+        const rewriteStream = await cohere.chatStream({
+          model: 'command-a-reasoning-08-2025',
+          messages: [{ role: 'user', content: rewritePrompt }],
+          thinking: { type: 'enabled', tokenBudget: 4096 },
+        });
+        for await (const event of rewriteStream) {
+          if (abortController.signal.aborted) break;
+          if (event.type === 'content-delta') {
+            const thinking = event.delta?.message?.content?.thinking;
+            if (thinking) {
+              if (!writeSSE({ thinking })) break;
+            }
+            const text = event.delta?.message?.content?.text;
+            if (text) {
+              fullText += text;
+              if (!writeSSE({ text })) break;
+            }
+          }
+        }
+      } else if (GEMINI_API_KEY) {
+        const rewritePrompt = `Rewrite this video analysis into a clean, well-structured markdown summary with an overview, key takeaways, and section outline:\n\n${singleSource}`;
+        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+        const rewriteStream = await ai.models.generateContentStream({
+          model: 'gemini-2.0-flash-exp',
+          contents: [{ role: 'user', parts: [{ text: rewritePrompt }] }],
+        });
+        for await (const chunk of rewriteStream) {
+          if (abortController.signal.aborted) break;
+          const text = chunk.text;
+          if (text) {
+            fullText += text;
+            if (!writeSSE({ text })) break;
+          }
+        }
+      } else {
+        const chunkSize = 200;
+        for (let i = 0; i < singleSource.length; i += chunkSize) {
+          if (abortController.signal.aborted) break;
+          const chunk = singleSource.slice(i, i + chunkSize);
+          fullText += chunk;
+          if (!writeSSE({ text: chunk })) break;
+        }
       }
     }
 

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **AI thinking process now visible in all analysis paths** — previously, the thinking panel only appeared when both Gemini and Cohere analyses succeeded together. Now, when Cohere is available, all single-source analysis paths (Gemini-only or transcript-only) also route through Cohere reasoning, ensuring the AI thought process is always streamed and visible in the UI.
+
 ### Changed
 
 - **Mobile responsiveness overhaul** — improved touch-friendly styles (tap highlight, text-size-adjust, touch-action), enhanced 640px/480px/360px breakpoints with better spacing, font sizing, and layout stacking, and added safe-area inset support for notched phones

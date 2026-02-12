@@ -233,7 +233,6 @@ export default function App() {
             if (parsed.credits !== undefined) setCredits(parsed.credits);
             if (parsed.summaryId) {
               setSummaryId(parsed.summaryId);
-              setTargetSummaryId(parsed.summaryId);
             }
             if (parsed.thinking) {
               thinkingRef.current += parsed.thinking;

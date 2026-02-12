@@ -14,6 +14,7 @@ export default function SharedSummary({ id, onBack, onChat }: SharedSummaryProps
   const [displayedSummary, setDisplayedSummary] = React.useState('');
   const summaryRef = React.useRef('');
   const animFrameRef = React.useRef(0);
+  const displayIndexRef = React.useRef(0);
   const abortRef = React.useRef<AbortController | null>(null);
 
   React.useEffect(() => {
@@ -35,13 +36,14 @@ export default function SharedSummary({ id, onBack, onChat }: SharedSummaryProps
         setStreaming(true);
         summaryRef.current = '';
         setDisplayedSummary('');
+        displayIndexRef.current = 0;
 
         const tickAnimation = () => {
           const target = summaryRef.current;
-          const idx = animFrameRef.current;
+          const idx = displayIndexRef.current;
           if (idx < target.length) {
             const step = Math.min(3, target.length - idx);
-            animFrameRef.current = idx + step;
+            displayIndexRef.current = idx + step;
             setDisplayedSummary(target.slice(0, idx + step));
           }
           animFrameRef.current = requestAnimationFrame(tickAnimation);

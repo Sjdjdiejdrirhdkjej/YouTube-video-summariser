@@ -8,7 +8,6 @@ interface SharedSummaryProps {
 }
 
 export default function SharedSummary({ id, onBack, onChat }: SharedSummaryProps) {
-  const [videoUrl, setVideoUrl] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [streaming, setStreaming] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -79,7 +78,6 @@ export default function SharedSummary({ id, onBack, onChat }: SharedSummaryProps
 
               try {
                 const parsed = JSON.parse(data);
-                if (parsed.id) setVideoUrl(parsed.videoUrl || '');
                 if (parsed.summary) {
                   summaryRef.current += parsed.summary;
                 }
@@ -120,49 +118,15 @@ export default function SharedSummary({ id, onBack, onChat }: SharedSummaryProps
 
   return (
     <div className="app-container">
-      <header className="app-header">
-        <h1>Video Summarizer</h1>
-        <p>Shared Summary</p>
-      </header>
       <main className="main-content">
         <div className="summary-output">
-          <h2>Summary</h2>
-          {loading && (
-            <div className="summary-text loading-indicator">
-              <span className="dot-pulse" />
-              Loading summary...
-            </div>
-          )}
-          {error && (
-            <p className="summary-text error">
-              {error}
-            </p>
-          )}
           {displayedSummary && (
-            <>
-              {videoUrl && (
-                <p className="shared-video-link">
-                  Video: <a href={videoUrl} target="_blank" rel="noopener noreferrer">{videoUrl}</a>
-                </p>
-              )}
-              <p className="summary-id">
-                Summary ID: <code>/{id}</code>
-              </p>
-              <div
-                className={`summary-text markdown-body${streaming ? ' streaming' : ''}`}
-                dangerouslySetInnerHTML={{ __html: renderedHtml }}
-              />
-              {streaming && (
-                <p className="summary-text streaming-indicator">
-                  <span className="dot-pulse" /> Streaming...
-                </p>
-              )}
-            </>
+            <div
+              className={`summary-text markdown-body${streaming ? ' streaming' : ''}`}
+              dangerouslySetInnerHTML={{ __html: renderedHtml }}
+            />
           )}
         </div>
-        <button type="button" className="summarize-btn" onClick={onChat}>
-          Chat about it
-        </button>
       </main>
     </div>
   );

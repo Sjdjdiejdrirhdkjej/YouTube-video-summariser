@@ -41,17 +41,68 @@ export default function ChatPage({ id, summaryId, onBack }: ChatPageProps) {
         .catch((err) => setError(err.message))
         .finally(() => setLoading(false));
     } else if (summaryId) {
-      fetch(`/api/summary/${summaryId}`)
+      const controller = new AbortController();
+      let fullSummary = '';
+      let fullUrl = '';
+
+      fetch(`/api/summary/${summaryId}`, { signal: controller.signal })
         .then((r) => {
           if (!r.ok) throw new Error('Summary not found');
-          return r.json();
+          if (!r.body) throw new Error('Response body not available');
+
+          const reader = r.body.getReader();
+          const decoder = new TextDecoder();
+
+          const processStream = async () => {
+            let buffer = '';
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              buffer = buffer.replace(/\r\n/g, '\n');
+
+              const events = buffer.split('\n\n');
+              buffer = events.pop() || '';
+
+              for (const evt of events) {
+                const dataLines = evt
+                  .split('\n')
+                  .filter((l) => l.startsWith('data:'))
+                  .map((l) => l.slice(5).replace(/^ /, ''));
+
+                if (!dataLines.length) continue;
+
+                const data = dataLines.join('\n');
+                if (data === '[DONE]') break;
+
+                try {
+                  const parsed = JSON.parse(data);
+                  if (parsed.videoUrl) fullUrl = parsed.videoUrl;
+                  if (parsed.summary) fullSummary += parsed.summary;
+                } catch {}
+              }
+            }
+
+            try { reader.cancel(); } catch {}
+          };
+
+          return processStream();
         })
-        .then((data) => {
-          setSummary(data.summary || '');
-          setVideoUrl(data.videoUrl || '');
+        .then(() => {
+          setSummary(fullSummary);
+          setVideoUrl(fullUrl);
         })
-        .catch((err) => setError(err.message))
-        .finally(() => setLoading(false));
+        .catch((err) => {
+          if ((err as Error)?.name !== 'AbortError') {
+            setError(err.message);
+          }
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+
+      return () => controller.abort();
     }
   }, [id, summaryId]);
 

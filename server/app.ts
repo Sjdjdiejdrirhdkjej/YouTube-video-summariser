@@ -50,9 +50,8 @@ import cors from 'cors';
 import { GoogleGenAI } from '@google/genai';
 import { CohereClientV2 } from 'cohere-ai';
 import { OpenAI } from 'openai';
-import { gatherSignals, buildFusionPrompt, extractVideoId as extractId } from './youtube.js';
+import { gatherSignals, buildFusionPrompt } from './youtube.js';
 
-const openai = new OpenAI();
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -147,8 +146,12 @@ app.get('/api/credits', (req, res) => {
 });
 
 app.post('/api/summarize', async (req, res) => {
+  let fp: string | null = null;
+  let videoUrl = '';
+  let summaryId: string | undefined;
+
   try {
-    const fp = getFingerprint(req);
+    fp = getFingerprint(req);
     if (!fp) {
       res.status(400).json({ error: 'Missing fingerprint header.' });
       return;
@@ -157,7 +160,7 @@ app.post('/api/summarize', async (req, res) => {
       res.status(403).json({ error: 'No credits remaining. Each device gets 500 free credits.', credits: getCredits(fp) });
       return;
     }
-    const { videoUrl } = req.body;
+    videoUrl = req.body.videoUrl;
     if (!videoUrl || typeof videoUrl !== 'string') {
       res.status(400).json({ error: 'videoUrl is required' });
       return;
@@ -175,7 +178,7 @@ app.post('/api/summarize', async (req, res) => {
       return;
     }
 
-    const summaryId = generateSummaryId();
+    summaryId = generateSummaryId();
     let fullText = '';
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -197,8 +200,10 @@ app.post('/api/summarize', async (req, res) => {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
+    writeSSE({ text: 'Processing video...' });
+
     const stream = await ai.models.generateContentStream({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash-exp',
       contents: [
         {
           role: 'user',
@@ -221,15 +226,16 @@ app.post('/api/summarize', async (req, res) => {
       }
     }
 
-    if (fullText) {
-      savedSummaries.set(summaryId, {
-        id: summaryId,
-        fingerprint: fp,
-        videoUrl,
-        summary: fullText,
-        createdAt: Date.now(),
-      });
+    if (!fullText) {
+      throw new Error('Summary generation produced no content.');
     }
+    savedSummaries.set(summaryId, {
+      id: summaryId,
+      fingerprint: fp,
+      videoUrl,
+      summary: fullText,
+      createdAt: Date.now(),
+    });
 
     if (!res.writableEnded) {
       res.write(`data: ${JSON.stringify({ summaryId })}\n\n`);
@@ -254,8 +260,12 @@ app.post('/api/summarize', async (req, res) => {
 });
 
 app.post('/api/summarize-hybrid', async (req, res) => {
+  let fp: string | null = null;
+  let videoUrl = '';
+  let summaryId: string | undefined;
+
   try {
-    const fp = getFingerprint(req);
+    fp = getFingerprint(req);
     if (!fp) {
       res.status(400).json({ error: 'Missing fingerprint header.' });
       return;
@@ -264,7 +274,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       res.status(403).json({ error: 'No credits remaining. Each device gets 500 free credits.', credits: getCredits(fp) });
       return;
     }
-    const { videoUrl } = req.body;
+    videoUrl = req.body.videoUrl;
     if (!videoUrl || typeof videoUrl !== 'string') {
       res.status(400).json({ error: 'videoUrl is required' });
       return;
@@ -282,11 +292,8 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       return;
     }
 
-    const summaryId = generateSummaryId();
+    summaryId = generateSummaryId();
     let fullText = '';
-
-    const signals = await gatherSignals(videoUrl);
-    const prompt = buildFusionPrompt(signals);
 
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -305,12 +312,24 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       return true;
     };
 
+    writeSSE({ text: 'Fetching video information...' });
+
+    const signals = await gatherSignals(videoUrl);
+    const prompt = buildFusionPrompt(signals);
+
     const signalList = [
       signals.transcript ? 'transcript' : null,
       signals.oembed ? 'metadata' : null,
       signals.metadata?.chapters?.length ? 'chapters' : null,
       signals.comments.length ? 'comments' : null,
     ].filter(Boolean);
+
+    if (signalList.length === 0) {
+      throw new Error(
+        'Could not retrieve any usable signals from this video. ' +
+        Object.entries(signals.missing).map(([k, v]) => `${k}: ${v}`).join('; ')
+      );
+    }
 
     writeSSE({ text: `*Summarizing using: ${signalList.join(', ')}*\n\n---\n\n` });
 
@@ -326,8 +345,10 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       ],
     });
 
+    let eventCount = 0;
     for await (const event of stream) {
       if (abortController.signal.aborted) break;
+
       if (event.type === 'content-delta') {
         const text = event.delta?.message?.content?.text;
         if (text) {
@@ -335,17 +356,27 @@ app.post('/api/summarize-hybrid', async (req, res) => {
           if (!writeSSE({ text })) break;
         }
       }
+      eventCount++;
     }
 
-    if (fullText) {
-      savedSummaries.set(summaryId, {
-        id: summaryId,
-        fingerprint: fp,
-        videoUrl,
-        summary: fullText,
-        createdAt: Date.now(),
-      });
+    console.log(`Cohere stream finished: ${eventCount} events, ${fullText.length} chars of content`);
+
+    if (!fullText) {
+      const missingInfo = Object.entries(signals.missing).map(([k, v]) => `${k}: ${v}`).join('; ');
+      throw new Error(
+        `Summary generation produced no content (${eventCount} stream events received). ` +
+        `Signals used: [${signalList.join(', ')}]. Missing: [${missingInfo}]. ` +
+        `This may be due to insufficient video data (e.g., no transcript available).`
+      );
     }
+
+    savedSummaries.set(summaryId, {
+      id: summaryId,
+      fingerprint: fp,
+      videoUrl,
+      summary: fullText,
+      createdAt: Date.now(),
+    });
 
     if (!res.writableEnded) {
       res.write(`data: ${JSON.stringify({ summaryId })}\n\n`);
@@ -359,8 +390,13 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     }
     if (handleRateLimit(res, err)) return;
     console.error('Hybrid summarize error:', err);
-    const message =
-      err instanceof Error ? err.message : String(err);
+
+    let message = err instanceof Error ? err.message : String(err);
+
+    if (message.includes('Network error') || message.includes('ENOTFOUND') || message.includes('ECONNREFUSED')) {
+      message = 'Network error accessing YouTube. Please try a different video or use the standard summarize endpoint.';
+    }
+
     if (!res.headersSent) {
       res.status(500).json({ error: message });
     } else if (!res.writableEnded) {
@@ -427,19 +463,24 @@ app.post('/api/chat', async (req, res) => {
       { role: 'user', content: message },
     ];
 
-    const stream = await openai.chat.completions.create({
-      model: 'gpt-5.2',
-      messages: chatMessages,
-      stream: true,
+    const cohereMessages: { role: 'user' | 'assistant'; content: string }[] = [
+      { role: 'user', content: `${systemPrompt}\n\n${chatHistory.map(m => `${m.role}: ${m.content}`).join('\n\n')}\n\nuser: ${message}` },
+    ];
+
+    const stream = await cohere.chatStream({
+      model: 'command-a-03-2025',
+      messages: cohereMessages,
     });
 
     let fullResponse = '';
-    for await (const chunk of stream) {
+    for await (const event of stream) {
       if (abortController.signal.aborted) break;
-      const text = chunk.choices[0]?.delta?.content || '';
-      if (text) {
-        fullResponse += text;
-        if (!writeSSE({ text })) break;
+      if (event.type === 'content-delta') {
+        const text = event.delta?.message?.content?.text;
+        if (text) {
+          fullResponse += text;
+          if (!writeSSE({ text })) break;
+        }
       }
     }
 
@@ -553,7 +594,7 @@ app.get('/api/summary/:id', (req, res) => {
       setTimeout(streamNextChunk, 10);
     } else {
       // Send [DONE] when finished
-      writeSSE('data: [DONE]\n\n');
+      res.write('data: [DONE]\n\n');
       res.end();
     }
   };

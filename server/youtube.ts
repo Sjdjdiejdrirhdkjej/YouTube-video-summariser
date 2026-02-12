@@ -45,9 +45,12 @@ const FETCH_TIMEOUT = 10_000;
 function timedFetch(url: string, opts?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-  return fetch(url, { ...opts, signal: controller.signal }).finally(() =>
-    clearTimeout(timer)
-  );
+  return fetch(url, { ...opts, signal: controller.signal })
+    .catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Network error fetching ${url}: ${msg}`);
+    })
+    .finally(() => clearTimeout(timer));
 }
 
 export function extractVideoId(url: string): string | null {
@@ -205,11 +208,11 @@ export async function fetchTranscript(
   const items: TranscriptResponse[] =
     await YoutubeTranscript.fetchTranscript(videoUrl);
   if (!items || items.length === 0) {
-    throw new Error('Empty transcript');
+    throw new Error('Empty transcript – YouTube may have blocked the request or captions are disabled for this video');
   }
 
   const text = items.map((i) => i.text).join(' ');
-  const language = items[0]?.lang;
+  const language = items[0]?.lang ?? 'unknown';
 
   return {
     available: true,

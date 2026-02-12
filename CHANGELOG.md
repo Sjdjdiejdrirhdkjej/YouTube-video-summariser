@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Improved Cohere API error diagnostics** — "Summary generation produced no content" now reports which signals were available vs. missing, stream event count, and a helpful hint about transcript unavailability
+- **Better transcript error message** — `fetchTranscript` now explains that YouTube may have blocked the request or captions are disabled
+- **Undefined transcript language** — fixed `language` field defaulting to `undefined` when `youtube-transcript` doesn't return a `lang` property
+- **Removed noisy debug logging** — removed per-event `console.log('Cohere event:', event)` and debug SSE messages that leaked internal state to the client
+- **Early bail on empty signals** — hybrid summarizer now fails fast with a clear error when no usable signals (transcript, metadata, oembed) are available, instead of sending an empty prompt to Cohere
+
 ### Added
 
 - **IP-based credit system** — every IP gets 500 free credits (1 credit = 1¢); `/api/summarize` costs 5 credits, `/api/summarize-hybrid` costs 3 credits, `/api/chat` costs 1 credit; returns 403 when credits are exhausted

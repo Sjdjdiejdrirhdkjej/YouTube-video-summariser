@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-layer summarization fallback chain** — every valid YouTube URL now always produces a summary. The pipeline tries: Cohere → Gemini (text-based) → Gemini (direct video mode) → signal-based fallback summary → catch-all minimal summary, ensuring no request ever returns empty.
+- **LLM provider cascade** — if Cohere fails (rate limit, network error, outage), the summarizer automatically retries with Gemini before falling through to non-LLM fallbacks.
+- **Gemini direct video fallback** — when text-based LLM summarization produces no content, the system attempts Gemini's native video understanding as an additional fallback.
+- **Credit refund on failure** — credits are now refunded in all error paths (API failures, config errors, validation errors) so users never lose credits for failed summarizations.
+
+### Fixed
+
+- **Signal list check was too strict** — metadata description and tags are now counted as valid signals; previously only oembed and chapters were recognized, causing unnecessary failures when a video had description/tags but no transcript.
+- **`gatherSignals` failure no longer kills the pipeline** — if all signal gathering fails, the system constructs minimal signals and continues through all fallback layers instead of immediately returning an error.
+- **`buildSignalFallbackSummary` could return empty** — the function now always includes transcript excerpts alongside other sections (not just as a last resort), includes tags, and has an ultimate catch-all message guaranteeing non-empty output.
+- **Credits lost on config/validation errors** — credits are now refunded when the server returns early due to missing API keys or invalid input.
+
 ### Fixed
 
 - **Summarization responses are now non-streaming JSON** — the `/api/summarize` and `/api/summarize-hybrid` endpoints now return a single final payload (`summary`, `summaryId`, `credits`) and the main app consumes that response directly, removing incremental SSE response streaming for summarize requests.

@@ -1,5 +1,6 @@
 import React from 'react';
 import { marked } from 'marked';
+import { useError } from '../context/ErrorContext';
 
 interface SharedSummaryProps {
   id: string;
@@ -8,6 +9,7 @@ interface SharedSummaryProps {
 }
 
 export default function SharedSummary({ id, onBack, onChat }: SharedSummaryProps) {
+  const { addError } = useError();
   const [loading, setLoading] = React.useState(true);
   const [streaming, setStreaming] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -83,8 +85,8 @@ export default function SharedSummary({ id, onBack, onChat }: SharedSummaryProps
                 if (parsed.summary) {
                   summaryRef.current += parsed.summary;
                 }
-              } catch {
-                // ignore parse errors
+              } catch (e) {
+                addError(e);
               }
             }
           }
@@ -95,7 +97,11 @@ export default function SharedSummary({ id, onBack, onChat }: SharedSummaryProps
             cancelAnimationFrame(animFrameRef.current);
             setStreaming(false);
             setDisplayedSummary(summaryRef.current);
-            try { reader.cancel(); } catch {}
+            try {
+              if (reader) reader.cancel();
+            } catch (e) {
+              addError(e);
+            }
           });
       })
       .catch((err) => {

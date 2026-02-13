@@ -1,5 +1,6 @@
 import React from 'react';
 import { marked } from 'marked';
+import { useError } from '../context/ErrorContext';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -13,6 +14,7 @@ interface ChatPageProps {
 }
 
 export default function ChatPage({ id, summaryId, onBack }: ChatPageProps) {
+  const { addError } = useError();
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [summary, setSummary] = React.useState('');
   const [videoUrl, setVideoUrl] = React.useState('');
@@ -83,11 +85,17 @@ export default function ChatPage({ id, summaryId, onBack }: ChatPageProps) {
                   const parsed = JSON.parse(data);
                   if (parsed.videoUrl) fullUrl = parsed.videoUrl;
                   if (parsed.summary) fullSummary += parsed.summary;
-                } catch {}
+                } catch (e) {
+                  addError(e);
+                }
               }
             }
 
-            try { reader.cancel(); } catch {}
+            try {
+              if (reader) reader.cancel();
+            } catch (e) {
+              addError(e);
+            }
           };
 
           return processStream();
@@ -97,9 +105,8 @@ export default function ChatPage({ id, summaryId, onBack }: ChatPageProps) {
           setVideoUrl(fullUrl);
         })
         .catch((err) => {
-          if ((err as Error)?.name !== 'AbortError') {
-            setError(err.message);
-          }
+          setError(err.message);
+          addError(err);
         })
         .finally(() => {
           setLoading(false);
@@ -227,14 +234,20 @@ export default function ChatPage({ id, summaryId, onBack }: ChatPageProps) {
               assistantRef.current += parsed.text;
               setMessages([...history, { role: 'assistant', content: assistantRef.current }]);
             }
-          } catch {}
+          } catch (e) {
+            addError(e);
+          }
         }
       }
-      try { await reader.cancel(); } catch {}
+      try {
+        if (reader) await reader.cancel();
+      } catch (e) {
+        addError(e);
+      }
       setThinkingText('');
       setIsThinking(false);
     } catch (err) {
-      if ((err as Error)?.name === 'AbortError') { setStreaming(false); return; }
+      addError(err);
       assistantRef.current = `Error: ${err instanceof Error ? err.message : String(err)}`;
       setMessages([...messages, userMessage, { role: 'assistant', content: assistantRef.current }]);
     }

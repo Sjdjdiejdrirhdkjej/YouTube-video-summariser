@@ -1,5 +1,6 @@
 import React from 'react';
 import { marked } from 'marked';
+import { useError } from '../context/ErrorContext';
 import './manus-theme.css';
 
 interface YTSummarisePageProps {
@@ -19,6 +20,7 @@ function getFingerprint(): string {
 }
 
 export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
+  const { addError } = useError();
   const fingerprint = React.useMemo(() => getFingerprint(), []);
   const [videoUrl, setVideoUrl] = React.useState('');
   const [summary, setSummary] = React.useState('');
@@ -84,7 +86,9 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
     fetch('/api/credits', { headers: { 'X-Fingerprint': fingerprint } })
       .then((r) => r.json())
       .then((data) => setCredits(data.credits))
-      .catch(() => {});
+      .catch((e) => {
+        addError(e);
+      });
   }, [fingerprint]);
 
   React.useEffect(() => {
@@ -273,11 +277,17 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
                 if (parsed.retryAfter) setRetryAfter(parsed.retryAfter as number);
                 throw new Error(parsed.error as string);
               }
-            } catch {}
+            } catch (e) {
+              addError(e);
+            }
           }
         }
 
-        try { await reader.cancel(); } catch {}
+        try {
+          await reader.cancel();
+        } catch (e) {
+          addError(e);
+        }
         return { fullSummary, thinking: returnedThinking, summaryId: returnedSummaryId, credits };
       };
 
@@ -290,7 +300,11 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
 
       if (!r.ok) {
         let d: Record<string, unknown> = {};
-        try { d = await r.json(); } catch {}
+        try {
+          d = await r.json();
+        } catch (e) {
+          addError(e);
+        }
         if (d.retryAfter) setRetryAfter(d.retryAfter as number);
         setError(typeof d.error === 'string' ? d.error : `Request failed (${r.status})`);
         setLoading(false);
@@ -326,12 +340,7 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
       setStreaming(false);
       abortControllerRef.current = null;
     } catch (err) {
-      if ((err as Error)?.name === 'AbortError') {
-        setLoading(false);
-        setStreaming(false);
-        abortControllerRef.current = null;
-        return;
-      }
+      addError(err);
       setError(err instanceof Error ? err.message : String(err));
       setLoading(false);
       setStreaming(false);

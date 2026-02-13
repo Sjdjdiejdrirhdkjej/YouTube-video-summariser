@@ -368,10 +368,35 @@ function writeProgress(res: any, step: string, message: string): boolean {
   return true;
 }
 
+function startProgressHeartbeat(res: any, label = 'Still processing'): () => void {
+  const startedAt = Date.now();
+  const interval = setInterval(() => {
+    if (res.writableEnded) {
+      clearInterval(interval);
+      return;
+    }
+    const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+    writeProgress(res, 'processing', `${label}... (${elapsed}s)`);
+  }, 2500);
+
+  return () => clearInterval(interval);
+}
+
+function setupSSEHeaders(res: any): void {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  res.write(': ok\n\n');
+  (res as any).flush?.();
+}
+
 app.post('/api/summarize-hybrid', async (req, res) => {
   let fp: string | null = null;
   let videoUrl = '';
   let summaryId: string | undefined;
+  let stopHeartbeat: (() => void) | null = null;
 
   try {
     fp = getFingerprint(req);
@@ -394,6 +419,76 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       return;
     }
 
+    const mockMode = process.env.SUMMA_MOCK_MODE?.trim();
+    if (mockMode) {
+      setupSSEHeaders(res);
+
+      if (mockMode === 'stall_after_headers') {
+        return;
+      }
+
+      writeProgress(res, 'start', 'Initializing summarization...');
+
+      if (mockMode === 'stall_after_first_progress') {
+        return;
+      }
+
+      stopHeartbeat = startProgressHeartbeat(res);
+
+      if (mockMode === 'error') {
+        stopHeartbeat?.();
+        stopHeartbeat = null;
+        res.write(`data: ${JSON.stringify({ error: 'Mock summarize-hybrid error.', credits: getCredits(fp) })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+
+      if (mockMode === 'success') {
+        writeProgress(res, 'processing', 'Running deterministic mock summarization...');
+        summaryId = generateSummaryId();
+        const mockSummary = '## Mock Summary\n\n- Deterministic mock mode is active.\n- SSE framing and completion sentinel were emitted.\n- No external AI providers were called.';
+        const cacheKey = extractVideoId(videoUrl) || videoUrl;
+
+        savedSummaries.set(summaryId, {
+          id: summaryId,
+          fingerprint: fp,
+          videoUrl,
+          summary: mockSummary,
+          createdAt: Date.now(),
+        });
+        summaryCache.set(cacheKey, { summary: mockSummary, createdAt: Date.now() });
+
+        res.write(`data: ${JSON.stringify({
+          summary: mockSummary,
+          summaryId,
+          credits: getCredits(fp),
+          sources: ['mock'],
+          timings: {
+            totalMs: 0,
+            cacheMs: 0,
+            directMs: 0,
+            signalsMs: 0,
+            cohereMs: 0,
+            geminiTextMs: 0,
+          },
+          debug: { mockMode },
+        })}\n\n`);
+        stopHeartbeat?.();
+        stopHeartbeat = null;
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+
+      stopHeartbeat?.();
+      stopHeartbeat = null;
+      res.write(`data: ${JSON.stringify({ error: `Unknown SUMMA_MOCK_MODE: ${mockMode}` })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
+
     if (!GEMINI_API_KEY && !COHERE_API_KEY) {
       refundCredits(fp, 5);
       res.status(500).json({
@@ -402,14 +497,9 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       return;
     }
 
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders();
-    res.write(': ok\n\n');
-    (res as any).flush?.();
+    setupSSEHeaders(res);
     writeProgress(res, 'start', 'Initializing summarization...');
+    stopHeartbeat = startProgressHeartbeat(res);
     writeProgress(res, 'validating', 'Validating video URL...');
 
     // Check cache first
@@ -426,6 +516,8 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       });
       writeProgress(res, 'complete', 'Summary ready!');
       res.write(`data: ${JSON.stringify({ summary: cached.summary, summaryId, credits: getCredits(fp), sources: ['cache'] })}\n\n`);
+      stopHeartbeat?.();
+      stopHeartbeat = null;
       res.write('data: [DONE]\n\n');
       res.end();
       return;
@@ -434,121 +526,15 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     summaryId = generateSummaryId();
     let fullText = '';
     let thinkingText = '';
-    const startTime = Date.now();
 
     const abortController = new AbortController();
     req.on('close', () => abortController.abort());
 
-    // Try direct video URL summarization FIRST (fastest - no need to fetch transcript/metadata)
-    writeProgress(res, 'analyzing', 'Analyzing video content...');
-    writeProgress(res, 'processing', 'Processing video with AI...');
-    
-    let directMethodSucceeded = false;
-    let modelUsed = '';
-    let streamedThinking = '';
-
-    const directModels = ['gemini-3-pro', 'gemini-2.5-flash'];
-    
-    if (GEMINI_API_KEY) {
-      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-      
-      const raceWithTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
-        return new Promise((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error('Timeout')), ms);
-          promise.then(v => { clearTimeout(timer); resolve(v); }, e => { clearTimeout(timer); reject(e); });
-        });
-      };
-      
-      // Send periodic updates so user doesn't see "analyzing" forever
-      const progressInterval = setInterval(() => {
-        if (!abortController.signal.aborted && !res.writableEnded) {
-          const elapsed = Math.floor((Date.now() - startTime) / 1000);
-          writeProgress(res, 'processing', `Processing video with AI... (${elapsed}s)`);
-        }
-      }, 3000);
-      
-      try {
-        const result = await raceWithTimeout(
-          Promise.any(directModels.map(async (model) => {
-            if (abortController.signal.aborted) throw new Error('Aborted');
-            console.log(`Racing direct video summarization with model: ${model}`);
-            const stream = await ai.models.generateContentStream({
-              model,
-              contents: [
-                {
-                  role: 'user',
-                  parts: [
-                    { fileData: { fileUri: videoUrl } },
-                    {
-                      text: 'Summarize this video in clear, concise points. Include key takeaways. Keep the summary readable and well-structured (use markdown line breaks and bullets where helpful).',
-                    },
-                  ],
-                },
-              ],
-            });
-            
-            let text = '';
-            for await (const chunk of stream) {
-              if (abortController.signal.aborted) throw new Error('Aborted');
-              // Stream thinking-like progress based on content length
-              if (chunk.text) {
-                text += chunk.text;
-                // Send thinking-like updates
-                if (text.length > 50 && text.length < 500 && !streamedThinking.includes('Extracting')) {
-                  streamedThinking += '📝 Extracting key information from video...\n';
-                  if (!res.writableEnded) {
-                    res.write(`data: ${JSON.stringify({ progress: { step: 'thinking', thinking: streamedThinking } })}\n\n`);
-                    (res as any).flush?.();
-                  }
-                } else if (text.length >= 500 && !streamedThinking.includes('Synthesizing')) {
-                  streamedThinking += '✨ Synthesizing summary...';
-                  if (!res.writableEnded) {
-                    res.write(`data: ${JSON.stringify({ progress: { step: 'thinking', thinking: streamedThinking } })}\n\n`);
-                    (res as any).flush?.();
-                  }
-                }
-              }
-            }
-            
-            if (!text.trim()) throw new Error('Empty response');
-            return { text, model };
-          })),
-          15_000 // 15 second timeout for the entire race
-        );
-        
-        clearInterval(progressInterval);
-        fullText = result.text;
-        modelUsed = result.model;
-        directMethodSucceeded = true;
-        console.log(`Direct video URL summarization succeeded with ${result.model}`);
-      } catch (raceErr) {
-        clearInterval(progressInterval);
-        console.error('All direct Gemini models failed or timed out:', raceErr);
-      }
-    }
-
-    // If direct method succeeded, we're done! Skip the slow signal gathering
-    if (directMethodSucceeded && fullText.trim() && !abortController.signal.aborted) {
-      savedSummaries.set(summaryId, {
-        id: summaryId,
-        fingerprint: fp,
-        videoUrl,
-        summary: fullText,
-        createdAt: Date.now(),
-      });
-      summaryCache.set(cacheKey, { summary: fullText, createdAt: Date.now() });
-
-      writeProgress(res, 'complete', 'Summary ready!');
-      res.write(`data: ${JSON.stringify({ summary: fullText, summaryId, credits: getCredits(fp), sources: ['direct'], model: modelUsed, thinking: streamedThinking || undefined })}\n\n`);
-      res.write('data: [DONE]\n\n');
-      res.end();
-      return;
-    }
-
-    // Direct method failed or was aborted - fall back to data gathering approach
+    // Gather video data (transcript, metadata, etc.) for hybrid analysis
     if (!abortController.signal.aborted) {
-      writeProgress(res, 'fallback', 'Direct video analysis timed out, gathering video data...');
-      writeProgress(res, 'metadata', 'Fetching video information...');
+      writeProgress(res, 'analyzing', 'Analyzing video content...');
+      writeProgress(res, 'gathering', 'Gathering video signals...');
+      writeProgress(res, 'metadata', 'Fetching metadata & transcript...');
       
       let signals: VideoSignals;
       
@@ -599,6 +585,8 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       }
 
       if (abortController.signal.aborted) {
+        stopHeartbeat?.();
+        stopHeartbeat = null;
         return;
       }
 
@@ -611,15 +599,13 @@ app.post('/api/summarize-hybrid', async (req, res) => {
         signals.comments.length ? 'comments' : null,
       ].filter(Boolean) as string[];
 
-      writeProgress(res, 'gathering', 'Gathering video data...');
-      
       const prompt = buildFusionPrompt(signals);
-      writeProgress(res, 'analyzing', 'Analyzing video content...');
+      writeProgress(res, 'processing', 'Synthesizing summary with AI...');
 
       // Stream thinking in real-time during generation
       let streamedThinking = '';
-      let currentStep = 'analyzing';
-      let stepSent = { analyzing: true, reasoning: false, drafting: false, refining: false };
+      let currentStep = 'processing';
+      let stepSent = { analyzing: true, processing: true, reasoning: false, drafting: false, refining: false };
 
       const updateStep = (newStep: string) => {
         if (!stepSent[newStep as keyof typeof stepSent]) {
@@ -711,6 +697,8 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       thinkingText = streamedThinking;
 
       if (abortController.signal.aborted) {
+        stopHeartbeat?.();
+        stopHeartbeat = null;
         return;
       }
 
@@ -733,10 +721,14 @@ app.post('/api/summarize-hybrid', async (req, res) => {
 
       // Send final response via SSE
       res.write(`data: ${JSON.stringify({ summary: fullText, summaryId, credits: getCredits(fp), sources: signalList, thinking: thinkingText || undefined })}\n\n`);
+      stopHeartbeat?.();
+      stopHeartbeat = null;
       res.write('data: [DONE]\n\n');
       res.end();
     }
   } catch (err) {
+    stopHeartbeat?.();
+    stopHeartbeat = null;
     if ((err as any)?.name === 'AbortError') {
       if (!res.writableEnded) res.end();
       return;

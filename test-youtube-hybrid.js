@@ -5,15 +5,37 @@
  * Tests: gatherSignals, buildFusionPrompt, and API endpoint
  */
 
-import {
-  extractVideoId,
-  fetchOEmbed,
-  fetchWatchPageMetadata,
-  fetchTranscript,
-  fetchTopComments,
-  gatherSignals,
-  buildFusionPrompt,
-} from './server/youtube.js';
+let extractVideoId;
+let fetchOEmbed;
+let fetchWatchPageMetadata;
+let fetchTopComments;
+let gatherSignals;
+let buildFusionPrompt;
+
+async function loadYoutubeHelpers() {
+  let mod;
+  try {
+    mod = await import('./server/youtube.js');
+  } catch {
+    throw new Error(
+      'Unable to load ./server/youtube.js. Run this script with transpiled server output, or use verifier mode only.'
+    );
+  }
+
+  ({
+    extractVideoId,
+    fetchOEmbed,
+    fetchWatchPageMetadata,
+    fetchTopComments,
+    gatherSignals,
+    buildFusionPrompt,
+  } = mod);
+}
+
+process.on('unhandledRejection', (error) => {
+  log(`Unhandled rejection: ${error}`, 'red');
+  process.exit(1);
+});
 
 // ANSI color codes for terminal output
 const colors = {
@@ -57,12 +79,151 @@ function assert(condition, message) {
   }
 }
 
+function getNumericArg(flag) {
+  const idx = process.argv.indexOf(flag);
+  if (idx < 0) return null;
+  const raw = process.argv[idx + 1];
+  if (!raw) {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`Invalid numeric value for ${flag}: ${raw}`);
+  }
+  return value;
+}
+
+async function runHybridSseVerifier() {
+  const expectFirstEventMs = getNumericArg('--expect-first-event-ms');
+  const expectDoneMs = getNumericArg('--expect-done-ms');
+
+  if (expectFirstEventMs === null && expectDoneMs === null) {
+    return false;
+  }
+
+  const firstEventDeadline = expectFirstEventMs ?? 2000;
+  const doneDeadline = expectDoneMs ?? 5000;
+
+  section('SSE VERIFIER: /api/summarize-hybrid');
+  log(`  SUMMA_MOCK_MODE=${process.env.SUMMA_MOCK_MODE || '(unset)'}`, 'yellow');
+  log(`  Expect first data event <= ${firstEventDeadline}ms`, 'yellow');
+  log(`  Expect [DONE] <= ${doneDeadline}ms`, 'yellow');
+
+  const startMs = Date.now();
+  let firstDataEventMs = null;
+  let doneMs = null;
+  let finalPayload = null;
+
+  const timeoutMs = Math.max(doneDeadline + 1500, 3000);
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), timeoutMs);
+
+  try {
+    const response = await fetch('http://localhost:3001/api/summarize-hybrid', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Fingerprint': 'mock-verifier-fingerprint',
+      },
+      body: JSON.stringify({ videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }),
+      signal: abortController.signal,
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Expected 200 from /api/summarize-hybrid, got ${response.status}: ${body}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body from SSE endpoint');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (doneMs === null) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+
+      for (const evt of events) {
+        const dataLines = evt
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).replace(/^ /, ''));
+
+        if (!dataLines.length) continue;
+
+        const data = dataLines.join('\n');
+        if (firstDataEventMs === null && data !== '[DONE]') {
+          firstDataEventMs = Date.now() - startMs;
+        }
+
+        if (data === '[DONE]') {
+          doneMs = Date.now() - startMs;
+          break;
+        }
+
+        let parsed;
+        try {
+          parsed = JSON.parse(data);
+        } catch {
+          continue;
+        }
+
+        if (parsed && typeof parsed === 'object' && parsed.summary) {
+          finalPayload = parsed;
+        }
+      }
+    }
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    throw new Error(`SSE verifier request failed: ${err.message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  assert(firstDataEventMs !== null, 'Expected at least one data event before [DONE]');
+  assert(firstDataEventMs <= firstEventDeadline, `First data event exceeded deadline: ${firstDataEventMs}ms > ${firstEventDeadline}ms`);
+  assert(doneMs !== null, 'Expected data: [DONE] sentinel');
+  assert(doneMs <= doneDeadline, `[DONE] exceeded deadline: ${doneMs}ms > ${doneDeadline}ms`);
+  assert(finalPayload, 'Expected final summary payload before [DONE]');
+  assert(typeof finalPayload.summary === 'string' && finalPayload.summary.length > 0, 'Final payload missing summary');
+  assert(typeof finalPayload.summaryId === 'string' && finalPayload.summaryId.length > 0, 'Final payload missing summaryId');
+  assert(typeof finalPayload.credits === 'number', 'Final payload missing credits');
+  assert(Array.isArray(finalPayload.sources), 'Final payload missing sources array');
+  assert(finalPayload.timings && typeof finalPayload.timings === 'object', 'Final payload missing timings object');
+  assert(typeof finalPayload.timings.totalMs === 'number', 'timings.totalMs missing');
+  assert(typeof finalPayload.timings.cacheMs === 'number', 'timings.cacheMs missing');
+  assert(typeof finalPayload.timings.directMs === 'number', 'timings.directMs missing');
+  assert(typeof finalPayload.timings.signalsMs === 'number', 'timings.signalsMs missing');
+  assert(typeof finalPayload.timings.cohereMs === 'number', 'timings.cohereMs missing');
+  assert(typeof finalPayload.timings.geminiTextMs === 'number', 'timings.geminiTextMs missing');
+  assert(finalPayload.debug && typeof finalPayload.debug === 'object', 'Final payload missing debug object');
+  assert(typeof finalPayload.debug.mockMode === 'string', 'debug.mockMode missing');
+
+  log(`✓ First data event in ${firstDataEventMs}ms`, 'green');
+  log(`✓ [DONE] in ${doneMs}ms`, 'green');
+  log('✓ Final payload contract verified', 'green');
+  return true;
+}
+
 // Test videos - known working videos with various features
 const TEST_VIDEOS = {
   basic: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Classic video
   short: 'https://youtu.be/jNQXAC9IVRw', // YouTube first video (has some issues but good for testing)
   alternative: 'https://www.youtube.com/embed/9bZkp7q19f0', // Gangnam Style
 };
+
+if (await runHybridSseVerifier()) {
+  process.exit(0);
+}
+
+await loadYoutubeHelpers();
 
 // ============================================================================
 // Test 1: URL Parsing
@@ -363,9 +524,3 @@ if (failed === 0) {
   log('\n❌ Some tests failed!', 'red');
   process.exit(1);
 }
-
-// Handle unhandled rejections
-process.on('unhandledRejection', (error) => {
-  log(`Unhandled rejection: ${error}`, 'red');
-  process.exit(1);
-});

@@ -1,5 +1,6 @@
 import React from 'react';
 import { marked } from 'marked';
+import { useError } from '../context/ErrorContext';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -13,6 +14,7 @@ interface ChatProps {
 }
 
 export default function Chat({ summary, videoUrl, onClose }: ChatProps) {
+  const { addError } = useError();
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [input, setInput] = React.useState('');
   const [streaming, setStreaming] = React.useState(false);
@@ -167,17 +169,25 @@ export default function Chat({ summary, videoUrl, onClose }: ChatProps) {
                 return newMessages;
               });
             }
-          } catch {}
+          } catch (e) {
+            addError(e);
+          }
         }
       }
 
-      try { await reader.cancel(); } catch {}
+      try {
+        await reader.cancel();
+      } catch (e) {
+        addError(e);
+      }
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') {
         setStreaming(false);
         return;
       }
+      addError(err);
       assistantRef.current = `Error: ${err instanceof Error ? err.message : String(err)}`;
+
       updateMessages(prev => {
         const newMessages = [...prev];
         newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };

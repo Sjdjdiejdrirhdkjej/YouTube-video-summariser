@@ -136,6 +136,96 @@ function isValidYoutubeUrl(url: string): boolean {
   return /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/.test(url);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function extractCohereContent(content: unknown): { thinking?: string; text?: string } {
+  if (typeof content === 'string') {
+    return { text: content };
+  }
+
+  if (Array.isArray(content)) {
+    let thinking = '';
+    let text = '';
+
+    for (const item of content) {
+      const extracted = extractCohereContent(item);
+      if (extracted.thinking) thinking += extracted.thinking;
+      if (extracted.text) text += extracted.text;
+    }
+
+    return {
+      thinking: thinking || undefined,
+      text: text || undefined,
+    };
+  }
+
+  if (!isRecord(content)) {
+    return {};
+  }
+
+  const thinking = content.thinking;
+  const text = content.text;
+
+  return {
+    thinking: typeof thinking === 'string' ? thinking : undefined,
+    text: typeof text === 'string' ? text : undefined,
+  };
+}
+
+function extractCohereDelta(event: unknown): { thinking?: string; text?: string } {
+  if (!isRecord(event)) return {};
+  const delta = event.delta;
+  if (!isRecord(delta)) return {};
+  const message = delta.message;
+  if (!isRecord(message)) return {};
+  return extractCohereContent(message.content);
+}
+
+function buildSignalFallbackSummary(signals: VideoSignals): string {
+  const sections: string[] = [];
+
+  if (signals.oembed?.title) {
+    sections.push(`# ${signals.oembed.title}`);
+    if (signals.oembed.authorName) {
+      sections.push(`By ${signals.oembed.authorName}`);
+    }
+  }
+
+  if (signals.metadata?.description) {
+    sections.push(`## Overview\n\n${signals.metadata.description.slice(0, 1600)}`);
+  }
+
+  if (signals.metadata?.chapters?.length) {
+    const chapterLines = signals.metadata.chapters
+      .slice(0, 10)
+      .map((chapter) => {
+        const minutes = Math.floor(chapter.time / 60);
+        const seconds = String(chapter.time % 60).padStart(2, '0');
+        return `- ${minutes}:${seconds} ${chapter.title}`;
+      })
+      .join('\n');
+
+    sections.push(`## Chapters\n\n${chapterLines}`);
+  }
+
+  if (signals.comments.length) {
+    const commentLines = signals.comments
+      .slice(0, 3)
+      .map((comment) => `- ${comment.text}`)
+      .join('\n');
+
+    sections.push(`## Top Comments\n\n${commentLines}`);
+  }
+
+  if (!sections.length && signals.transcript?.text) {
+    sections.push(`## Transcript Excerpt\n\n${signals.transcript.text.slice(0, 2000)}`);
+  }
+
+  return sections.join('\n\n').trim();
+}
+
 app.get('/api/credits', (req, res) => {
   const fp = getFingerprint(req);
   if (!fp) {
@@ -181,29 +271,10 @@ app.post('/api/summarize', async (req, res) => {
     summaryId = generateSummaryId();
     let fullText = '';
 
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders();
-    res.write(': ok\n\n');
-    (res as any).flush?.();
-    res.write(`data: ${JSON.stringify({ credits: getCredits(fp) })}\n\n`);
-    (res as any).flush?.();
-
     const abortController = new AbortController();
     req.on('close', () => abortController.abort());
 
-    const writeSSE = (obj: unknown): boolean => {
-      if (res.writableEnded || abortController.signal.aborted) return false;
-      res.write(`data: ${JSON.stringify(obj)}\n\n`);
-      (res as any).flush?.(); // Flush for Vercel streaming
-      return true;
-    };
-
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-
-    writeSSE({ text: 'Processing video...' });
 
     const stream = await ai.models.generateContentStream({
       model: 'gemini-2.0-flash-exp',
@@ -225,13 +296,17 @@ app.post('/api/summarize', async (req, res) => {
       const text = chunk.text;
       if (text) {
         fullText += text;
-        if (!writeSSE({ text })) break;
       }
     }
 
-    if (!fullText) {
+    if (abortController.signal.aborted) {
+      return;
+    }
+
+    if (!fullText.trim()) {
       throw new Error('Summary generation produced no content.');
     }
+
     savedSummaries.set(summaryId, {
       id: summaryId,
       fingerprint: fp,
@@ -240,24 +315,16 @@ app.post('/api/summarize', async (req, res) => {
       createdAt: Date.now(),
     });
 
-    if (!res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ summaryId })}\n\n`);
-      res.write('data: [DONE]\n\n');
-      res.end();
-    }
+    res.json({ summary: fullText, summaryId, credits: getCredits(fp) });
   } catch (err) {
     if ((err as any)?.name === 'AbortError') {
-      if (!res.writableEnded) res.end();
       return;
     }
     if (handleRateLimit(res, err)) return;
     console.error('Summarize error:', err);
     const message = err instanceof Error ? err.message : String(err);
     if (!res.headersSent) {
-      res.status(500).json({ error: message });
-    } else if (!res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
-      res.end();
+      res.status(500).json({ error: message, credits: fp ? getCredits(fp) : undefined });
     }
   }
 });
@@ -297,26 +364,10 @@ app.post('/api/summarize-hybrid', async (req, res) => {
 
     summaryId = generateSummaryId();
     let fullText = '';
-
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders();
-    res.write(': ok\n\n');
-    (res as any).flush?.();
-    res.write(`data: ${JSON.stringify({ credits: getCredits(fp) })}\n\n`);
-    (res as any).flush?.();
+    let thinkingText = '';
 
     const abortController = new AbortController();
     req.on('close', () => abortController.abort());
-
-    const writeSSE = (obj: unknown): boolean => {
-      if (res.writableEnded || abortController.signal.aborted) return false;
-      res.write(`data: ${JSON.stringify(obj)}\n\n`);
-      (res as any).flush?.();
-      return true;
-    };
 
     let signals: VideoSignals;
     try {
@@ -329,7 +380,6 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     }
 
     if (abortController.signal.aborted) {
-      if (!res.writableEnded) res.end();
       return;
     }
 
@@ -344,12 +394,9 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       throw new Error('Could not analyze the video with any method. The video may be unavailable or restricted.');
     }
 
-    writeSSE({ text: `*Sources: ${signalList.join(', ')}*\n\n` });
-
     const prompt = buildFusionPrompt(signals);
 
     if (COHERE_API_KEY) {
-      writeSSE({ text: 'Reasoning through the analysis...\n\n---\n\n' });
       const cohere = new CohereClientV2({ token: COHERE_API_KEY });
       const stream = await cohere.chatStream({
         model: 'command-a-reasoning-08-2025',
@@ -359,14 +406,12 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       for await (const event of stream) {
         if (abortController.signal.aborted) break;
         if (event.type === 'content-delta') {
-          const thinking = event.delta?.message?.content?.thinking;
+          const { thinking, text } = extractCohereDelta(event);
           if (thinking) {
-            if (!writeSSE({ thinking })) break;
+            thinkingText += thinking;
           }
-          const text = event.delta?.message?.content?.text;
           if (text) {
             fullText += text;
-            if (!writeSSE({ text })) break;
           }
         }
       }
@@ -381,7 +426,6 @@ app.post('/api/summarize-hybrid', async (req, res) => {
         const text = chunk.text;
         if (text) {
           fullText += text;
-          if (!writeSSE({ text })) break;
         }
       }
     } else {
@@ -390,10 +434,20 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       if (signals.metadata?.description) metaParts.push(signals.metadata.description);
       if (signals.transcript) metaParts.push(`Transcript: ${signals.transcript.text.slice(0, 5000)}`);
       fullText = metaParts.join('\n\n');
-      if (fullText) writeSSE({ text: fullText });
     }
 
-    if (!fullText) {
+    if (abortController.signal.aborted) {
+      return;
+    }
+
+    if (!fullText.trim()) {
+      const fallbackSummary = buildSignalFallbackSummary(signals);
+      if (fallbackSummary) {
+        fullText = fallbackSummary;
+      }
+    }
+
+    if (!fullText.trim()) {
       throw new Error('Summary generation produced no content.');
     }
 
@@ -405,14 +459,15 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       createdAt: Date.now(),
     });
 
-    if (!res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ summaryId })}\n\n`);
-      res.write('data: [DONE]\n\n');
-      res.end();
-    }
+    res.json({
+      summary: fullText,
+      summaryId,
+      credits: getCredits(fp),
+      sources: signalList,
+      thinking: thinkingText || undefined,
+    });
   } catch (err) {
     if ((err as any)?.name === 'AbortError') {
-      if (!res.writableEnded) res.end();
       return;
     }
     if (handleRateLimit(res, err)) return;
@@ -425,10 +480,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     }
 
     if (!res.headersSent) {
-      res.status(500).json({ error: message });
-    } else if (!res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
-      res.end();
+      res.status(500).json({ error: message, credits: fp ? getCredits(fp) : undefined });
     }
   }
 });
@@ -507,11 +559,10 @@ app.post('/api/chat', async (req, res) => {
     for await (const event of stream) {
       if (abortController.signal.aborted) break;
       if (event.type === 'content-delta') {
-        const thinking = event.delta?.message?.content?.thinking;
+        const { thinking, text } = extractCohereDelta(event);
         if (thinking) {
           if (!writeSSE({ thinking })) break;
         }
-        const text = event.delta?.message?.content?.text;
         if (text) {
           fullResponse += text;
           if (!writeSSE({ text })) break;

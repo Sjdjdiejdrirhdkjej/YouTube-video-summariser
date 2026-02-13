@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Summarization responses are now non-streaming JSON** — the `/api/summarize` and `/api/summarize-hybrid` endpoints now return a single final payload (`summary`, `summaryId`, `credits`) and the main app consumes that response directly, removing incremental SSE response streaming for summarize requests.
 - **URL summarize no longer ends silently with blank output** — the main SSE parser now processes any final buffered `data:` event on stream completion (even without a trailing delimiter) and surfaces a clear error when no summary text is returned, instead of falling back to an empty state.
 - **Blank summary after processing YouTube URL** — improved streaming delta parsing for Cohere responses (including alternate content shapes) and added a server-side signal-based fallback summary when the model streams no text, preventing completed runs from rendering an empty result.
 - **AI thinking process now visible in all analysis paths** — previously, the thinking panel only appeared when both Gemini and Cohere analyses succeeded together. Now, when Cohere is available, all single-source analysis paths (Gemini-only or transcript-only) also route through Cohere reasoning, ensuring the AI thought process is always streamed and visible in the UI.

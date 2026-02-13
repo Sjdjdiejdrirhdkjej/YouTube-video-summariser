@@ -141,168 +141,77 @@ export default function App() {
         signal: abortController.signal,
       });
 
+      let data: unknown = {};
+      try {
+        data = await res.json();
+      } catch {
+        data = {};
+      }
+
+      const payload = typeof data === 'object' && data !== null
+        ? data as Record<string, unknown>
+        : {};
+
+      const credits = payload.credits;
+      if (typeof credits === 'number') setCredits(credits);
+
       if (!res.ok) {
-        try {
-          const data = await res.json();
-          if (data.credits !== undefined) setCredits(data.credits);
-          if (data.retryAfter) setRetryAfter(data.retryAfter);
-          setError(data.error);
-        } catch {
-          setError(`Request failed (${res.status})`);
+        const retryAfterValue = payload.retryAfter;
+        if (typeof retryAfterValue === 'number' && retryAfterValue > 0) {
+          setRetryAfter(retryAfterValue);
         }
+        const errorMessage = typeof payload.error === 'string'
+          ? payload.error
+          : `Request failed (${res.status})`;
+        setError(errorMessage);
         setLoading(false);
-        return;
-      }
-
-      setLoading(false);
-      setStreaming(true);
-
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) {
-        setError('Streaming not supported');
         setStreaming(false);
+        abortControllerRef.current = null;
         return;
       }
 
-      let buffer = '';
-      let stopped = false;
-      let streamErrored = false;
-
-      const tickAnimation = () => {
-        const target = summaryRef.current;
-        const idx = displayIndexRef.current;
-        if (idx < target.length) {
-          const step = Math.min(3, target.length - idx);
-          displayIndexRef.current = idx + step;
-          setDisplayedSummary(target.slice(0, idx + step));
-        }
-        if (!stopped) {
-          animFrameRef.current = requestAnimationFrame(tickAnimation);
-        }
-      };
-      animFrameRef.current = requestAnimationFrame(tickAnimation);
-
-      while (!stopped) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        buffer = buffer.replace(/\r\n/g, '\n');
-
-        const events = buffer.split('\n\n');
-        buffer = events.pop() || '';
-
-        for (const evt of events) {
-          const dataLines = evt
-            .split('\n')
-            .filter((l) => l.startsWith('data:'))
-            .map((l) => l.slice(5).replace(/^ /, ''));
-
-          if (!dataLines.length) continue;
-
-            const data = dataLines.join('\n');
-            if (data === '[DONE]') {
-              stopped = true;
-              break;
-            }
-
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
-              if (parsed.retryAfter) setRetryAfter(parsed.retryAfter);
-              setError(parsed.error);
-              streamErrored = true;
-              stopped = true;
-              break;
-            }
-            if (parsed.credits !== undefined) setCredits(parsed.credits);
-            if (parsed.summaryId) {
-              setSummaryId(parsed.summaryId);
-            }
-            if (parsed.thinking) {
-              thinkingRef.current += parsed.thinking;
-              setThinkingText(thinkingRef.current);
-              setIsThinking(true);
-            }
-            const chunkText = typeof parsed.text === 'string'
-              ? parsed.text
-              : (typeof parsed.summary === 'string' ? parsed.summary : '');
-            if (chunkText) {
-              if (thinkingRef.current) {
-                setIsThinking(false);
-              }
-              summaryRef.current += chunkText;
-              setSummary(summaryRef.current);
-            }
-          } catch {
-            // ignore parse errors
-          }
-        }
+      const returnedSummaryId = payload.summaryId;
+      if (typeof returnedSummaryId === 'string' && returnedSummaryId) {
+        setSummaryId(returnedSummaryId);
       }
 
-      if (buffer.trim() && !stopped) {
-        const dataLines = buffer
-          .split('\n')
-          .filter((l) => l.startsWith('data:'))
-          .map((l) => l.slice(5).replace(/^ /, ''));
-
-        if (dataLines.length) {
-          const data = dataLines.join('\n');
-          if (data === '[DONE]') {
-            stopped = true;
-          } else {
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.error) {
-                if (parsed.retryAfter) setRetryAfter(parsed.retryAfter);
-                setError(parsed.error);
-                streamErrored = true;
-              }
-              if (parsed.credits !== undefined) setCredits(parsed.credits);
-              if (parsed.summaryId) {
-                setSummaryId(parsed.summaryId);
-              }
-              if (parsed.thinking) {
-                thinkingRef.current += parsed.thinking;
-                setThinkingText(thinkingRef.current);
-                setIsThinking(true);
-              }
-              const chunkText = typeof parsed.text === 'string'
-                ? parsed.text
-                : (typeof parsed.summary === 'string' ? parsed.summary : '');
-              if (chunkText) {
-                if (thinkingRef.current) {
-                  setIsThinking(false);
-                }
-                summaryRef.current += chunkText;
-                setSummary(summaryRef.current);
-              }
-            } catch {
-              // ignore parse errors
-            }
-          }
-        }
+      const returnedThinking = typeof payload.thinking === 'string' ? payload.thinking : '';
+      if (returnedThinking.trim()) {
+        thinkingRef.current = returnedThinking;
+        setThinkingText(returnedThinking);
+        setIsThinking(false);
       }
 
-      try { await reader.cancel(); } catch {}
-      cancelAnimationFrame(animFrameRef.current);
-      setDisplayedSummary(summaryRef.current);
-      displayIndexRef.current = summaryRef.current.length;
-      if (!summaryRef.current.trim() && !streamErrored) {
+      const fullSummary = typeof payload.summary === 'string'
+        ? payload.summary
+        : (typeof payload.text === 'string' ? payload.text : '');
+
+      if (!fullSummary.trim()) {
         setError('No summary was returned for this video. Please try another video.');
+        setLoading(false);
+        setStreaming(false);
+        abortControllerRef.current = null;
+        return;
       }
+
+      summaryRef.current = fullSummary;
+      displayIndexRef.current = fullSummary.length;
+      setSummary(fullSummary);
+      setDisplayedSummary(fullSummary);
+      setLoading(false);
       setStreaming(false);
+      abortControllerRef.current = null;
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') {
         setLoading(false);
         setStreaming(false);
+        abortControllerRef.current = null;
         return;
       }
       setError(err instanceof Error ? err.message : String(err));
       setLoading(false);
       setStreaming(false);
+      abortControllerRef.current = null;
     }
   };
 

@@ -73,9 +73,7 @@ export async function fetchOEmbed(videoUrl: string): Promise<OEmbedData> {
   };
 }
 
-export async function fetchWatchPageMetadata(
-  videoId: string
-): Promise<Metadata> {
+export async function fetchWatchPageHtml(videoId: string): Promise<string> {
   const url = `https://www.youtube.com/watch?v=${videoId}&hl=en`;
   const res = await timedFetch(url, {
     headers: {
@@ -85,8 +83,10 @@ export async function fetchWatchPageMetadata(
     },
   });
   if (!res.ok) throw new Error(`Watch page returned ${res.status}`);
-  const html = await res.text();
+  return res.text();
+}
 
+export function parseMetadataFromHtml(html: string): Metadata {
   let description = '';
   let chapters: Chapter[] = [];
   let tags: string[] = [];
@@ -131,6 +131,13 @@ export async function fetchWatchPageMetadata(
   }
 
   return { description, chapters, tags };
+}
+
+export async function fetchWatchPageMetadata(
+  videoId: string
+): Promise<Metadata> {
+  const html = await fetchWatchPageHtml(videoId);
+  return parseMetadataFromHtml(html);
 }
 
 function extractChaptersFromInitialData(data: any): Chapter[] {
@@ -272,50 +279,46 @@ export async function fetchTranscript(videoUrl: string): Promise<TranscriptData>
   );
 }
 
-export async function fetchTopComments(videoId: string): Promise<Comment[]> {
+export function parseCommentsFromHtml(html: string): Comment[] {
   const comments: Comment[] = [];
-  try {
-    const url = `https://www.youtube.com/watch?v=${videoId}&hl=en`;
-    const res = await timedFetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    });
-    if (!res.ok) return comments;
-    const html = await res.text();
 
-    const initialDataMatch = html.match(
-      /var\s+ytInitialData\s*=\s*(\{.+?\});\s*<\/script>/s
-    );
-    if (!initialDataMatch) return comments;
+  const initialDataMatch = html.match(
+    /var\s+ytInitialData\s*=\s*(\{.+?\});\s*<\/script>/s
+  );
+  if (!initialDataMatch) return comments;
 
-    const data = JSON.parse(initialDataMatch[1]);
-    const findComments = (obj: any): void => {
-      if (!obj || typeof obj !== 'object' || comments.length >= 10) return;
-      if (obj.commentRenderer) {
-        const renderer = obj.commentRenderer;
-        const text =
-          renderer.contentText?.runs?.map((r: any) => r.text).join('');
-        const likes = parseInt(renderer.voteCount?.simpleText, 10);
-        if (text) comments.push({ text, likes: isNaN(likes) ? 0 : likes });
-        return;
-      }
-      if (Array.isArray(obj)) {
-        for (const item of obj) findComments(item);
-      } else {
-        for (const val of Object.values(obj)) findComments(val);
-      }
-    };
+  const data = JSON.parse(initialDataMatch[1]);
+  const findComments = (obj: any): void => {
+    if (!obj || typeof obj !== 'object' || comments.length >= 10) return;
+    if (obj.commentRenderer) {
+      const renderer = obj.commentRenderer;
+      const text =
+        renderer.contentText?.runs?.map((r: any) => r.text).join('');
+      const likes = parseInt(renderer.voteCount?.simpleText, 10);
+      if (text) comments.push({ text, likes: isNaN(likes) ? 0 : likes });
+      return;
+    }
+    if (Array.isArray(obj)) {
+      for (const item of obj) findComments(item);
+    } else {
+      for (const val of Object.values(obj)) findComments(val);
+    }
+  };
 
-    findComments(data);
-  } catch {
-    // comments are best-effort
-  }
+  findComments(data);
   return comments;
 }
 
-const MAX_TRANSCRIPT_CHARS = 60_000;
+export async function fetchTopComments(videoId: string): Promise<Comment[]> {
+  try {
+    const html = await fetchWatchPageHtml(videoId);
+    return parseCommentsFromHtml(html);
+  } catch {
+    return [];
+  }
+}
+
+const MAX_TRANSCRIPT_CHARS = 20_000;
 
 export async function gatherSignals(videoUrl: string): Promise<VideoSignals> {
   const videoId = extractVideoId(videoUrl);
@@ -323,24 +326,29 @@ export async function gatherSignals(videoUrl: string): Promise<VideoSignals> {
 
   const missing: Record<string, string> = {};
 
-  const [oembedResult, metadataResult, transcriptResult, commentsResult] =
+  const [oembedResult, watchHtmlResult, transcriptResult] =
     await Promise.allSettled([
       fetchOEmbed(videoUrl),
-      fetchWatchPageMetadata(videoId),
+      fetchWatchPageHtml(videoId),
       fetchTranscript(videoUrl),
-      fetchTopComments(videoId),
     ]);
 
-  const oembed =
-    oembedResult.status === 'fulfilled' ? oembedResult.value : null;
+  const oembed = oembedResult.status === 'fulfilled' ? oembedResult.value : null;
   if (!oembed) missing.oembed = reasonFrom(oembedResult);
 
-  const metadata =
-    metadataResult.status === 'fulfilled' ? metadataResult.value : null;
-  if (!metadata) missing.metadata = reasonFrom(metadataResult);
+  let metadata: Metadata | null = null;
+  let comments: Comment[] = [];
 
-  let transcript =
-    transcriptResult.status === 'fulfilled' ? transcriptResult.value : null;
+  if (watchHtmlResult.status === 'fulfilled') {
+    const html = watchHtmlResult.value;
+    try { metadata = parseMetadataFromHtml(html); } catch { missing.metadata = 'parse error'; }
+    try { comments = parseCommentsFromHtml(html); } catch { /* best-effort */ }
+  } else {
+    missing.metadata = reasonFrom(watchHtmlResult);
+    missing.comments = reasonFrom(watchHtmlResult);
+  }
+
+  let transcript = transcriptResult.status === 'fulfilled' ? transcriptResult.value : null;
   if (!transcript) missing.transcript = reasonFrom(transcriptResult);
 
   if (transcript && transcript.text.length > MAX_TRANSCRIPT_CHARS) {
@@ -353,9 +361,7 @@ export async function gatherSignals(videoUrl: string): Promise<VideoSignals> {
     };
   }
 
-  const comments =
-    commentsResult.status === 'fulfilled' ? commentsResult.value : [];
-  if (comments.length === 0) missing.comments = reasonFrom(commentsResult);
+  if (comments.length === 0 && !missing.comments) missing.comments = 'no comments found';
 
   if (!oembed && !metadata && !transcript) {
     throw new Error(

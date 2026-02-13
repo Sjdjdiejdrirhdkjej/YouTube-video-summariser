@@ -441,60 +441,56 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     let directMethodSucceeded = false;
     let modelUsed = '';
 
-    // Model fallback chain: try best models first, fall back to faster/cheaper ones
-    const geminiModels = [
-      'gemini-3-pro',              // Gemini 3 Pro (best quality)
-      'gemini-2.5-pro',            // Gemini 2.5 Pro
-      'gemini-3-flash',            // Gemini 3 Flash
-      'gemini-2.5-flash',         // Gemini 2.5 Flash (most reliable)
-    ];
-
+    const directModels = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+    
     if (GEMINI_API_KEY) {
       const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
       
-      for (const model of geminiModels) {
-        if (abortController.signal.aborted) break;
-        
-        try {
-          console.log(`Trying direct video summarization with model: ${model}`);
-          const stream = await ai.models.generateContentStream({
-            model,
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  { fileData: { fileUri: videoUrl } },
-                  {
-                    text: 'Summarize this video in clear, concise points. Include key takeaways. Keep the summary readable and well-structured (use markdown line breaks and bullets where helpful).',
-                  },
-                ],
-              },
-            ],
-          });
-
-          for await (const chunk of stream) {
-            if (abortController.signal.aborted) break;
-            const text = chunk.text;
-            if (text) {
-              fullText += text;
+      const raceWithTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('Timeout')), ms);
+          promise.then(v => { clearTimeout(timer); resolve(v); }, e => { clearTimeout(timer); reject(e); });
+        });
+      };
+      
+      try {
+        const result = await raceWithTimeout(
+          Promise.any(directModels.map(async (model) => {
+            if (abortController.signal.aborted) throw new Error('Aborted');
+            console.log(`Racing direct video summarization with model: ${model}`);
+            const stream = await ai.models.generateContentStream({
+              model,
+              contents: [
+                {
+                  role: 'user',
+                  parts: [
+                    { fileData: { fileUri: videoUrl } },
+                    {
+                      text: 'Summarize this video in clear, concise points. Include key takeaways. Keep the summary readable and well-structured (use markdown line breaks and bullets where helpful).',
+                    },
+                  ],
+                },
+              ],
+            });
+            
+            let text = '';
+            for await (const chunk of stream) {
+              if (abortController.signal.aborted) throw new Error('Aborted');
+              if (chunk.text) text += chunk.text;
             }
-          }
-
-          if (fullText.trim()) {
-            directMethodSucceeded = true;
-            modelUsed = model;
-            console.log(`Direct video URL summarization succeeded with ${model}`);
-            break; // Success - exit the model loop
-          }
-        } catch (modelErr) {
-          console.error(`Model ${model} failed:`, modelErr);
-          fullText = ''; // Reset for next model attempt
-          // Continue to next model in the chain
-        }
-      }
-
-      if (!directMethodSucceeded) {
-        console.error('All Gemini models failed for direct video URL, falling back to data gathering');
+            
+            if (!text.trim()) throw new Error('Empty response');
+            return { text, model };
+          })),
+          25_000 // 25 second timeout for the entire race
+        );
+        
+        fullText = result.text;
+        modelUsed = result.model;
+        directMethodSucceeded = true;
+        console.log(`Direct video URL summarization succeeded with ${result.model}`);
+      } catch (raceErr) {
+        console.error('All direct Gemini models failed or timed out:', raceErr);
       }
     }
 
@@ -507,6 +503,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
         summary: fullText,
         createdAt: Date.now(),
       });
+      summaryCache.set(cacheKey, { summary: fullText, createdAt: Date.now() });
 
       writeProgress(res, 'complete', 'Summary ready!');
       res.write(`data: ${JSON.stringify({ summary: fullText, summaryId, credits: getCredits(fp), sources: ['direct'], model: modelUsed, thinking: thinkingText || undefined })}\n\n`);
@@ -618,16 +615,12 @@ app.post('/api/summarize-hybrid', async (req, res) => {
             const stream = await cohere.chatStream({
               model: 'command-a-reasoning-08-2025',
               messages: [{ role: 'user', content: prompt }],
-              thinking: { type: 'enabled', tokenBudget: 8192 },
+              thinking: { type: 'disabled' },
             });
             for await (const event of stream) {
               if (abortController.signal.aborted) break;
               if (event.type === 'content-delta') {
-                const { thinking, text } = extractCohereDelta(event);
-                if (thinking) {
-                  thinkingText += thinking;
-                  streamThinking(thinking);
-                }
+                const { text } = extractCohereDelta(event);
                 if (text) {
                   fullText += text;
                 }
@@ -687,6 +680,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
         summary: fullText,
         createdAt: Date.now(),
       });
+      summaryCache.set(cacheKey, { summary: fullText, createdAt: Date.now() });
 
       // Report completion
       writeProgress(res, 'complete', 'Summary ready!');

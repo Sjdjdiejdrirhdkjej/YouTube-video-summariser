@@ -415,164 +415,266 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     const abortController = new AbortController();
     req.on('close', () => abortController.abort());
 
-    let signals: VideoSignals;
-    
-    // Report progress: fetching video data
-    writeProgress(res, 'metadata', 'Fetching video information...');
-    
-    try {
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Request timed out after 30 seconds')), 30000)
-      );
-      signals = await Promise.race([gatherSignals(videoUrl), timeoutPromise]);
-    } catch (e) {
-      console.error('Signal gathering failed, constructing minimal signals:', e);
-      const videoId = extractVideoId(videoUrl) || 'unknown';
-      signals = {
-        videoId,
-        videoUrl,
-        oembed: null,
-        metadata: null,
-        transcript: null,
-        comments: [],
-        missing: { all: e instanceof Error ? e.message : String(e) },
-      };
-    }
+    // Try direct video URL summarization FIRST (fastest - no need to fetch transcript/metadata)
+    writeProgress(res, 'analyzing', 'Analyzing video content...');
+    let directMethodSucceeded = false;
+    let modelUsed = '';
 
-    // Report progress: analyzing content
-    if (signals.transcript) {
-      writeProgress(res, 'transcript', `Transcript loaded (${signals.transcript.segmentCount} segments)`);
-    } else {
-      writeProgress(res, 'transcript', 'No transcript available');
-    }
-    
-    if (signals.metadata?.chapters?.length) {
-      writeProgress(res, 'chapters', `${signals.metadata.chapters.length} chapters found`);
-    }
-    
-    if (signals.comments.length) {
-      writeProgress(res, 'comments', `${signals.comments.length} comments loaded`);
-    }
+    // Model fallback chain: try best models first, fall back to faster/cheaper ones
+    const geminiModels = [
+      'gemini-3-pro',              // Gemini 3 Pro (best quality)
+      'gemini-2.5-pro',            // Gemini 2.5 Pro
+      'gemini-3-flash',            // Gemini 3 Flash
+      'gemini-2.5-flash',         // Gemini 2.5 Flash (most reliable)
+    ];
 
-    if (abortController.signal.aborted) {
-      return;
-    }
-
-    const signalList = [
-      signals.transcript ? 'transcript' : null,
-      signals.oembed ? 'metadata' : null,
-      signals.metadata?.description ? 'description' : null,
-      signals.metadata?.chapters?.length ? 'chapters' : null,
-      signals.metadata?.tags?.length ? 'tags' : null,
-      signals.comments.length ? 'comments' : null,
-    ].filter(Boolean) as string[];
-
-    const prompt = buildFusionPrompt(signals);
-
-    // Report progress: generating summary
-    writeProgress(res, 'generating', 'Generating AI summary...');
-
-    try {
-      if (COHERE_API_KEY) {
+    if (GEMINI_API_KEY) {
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+      
+      for (const model of geminiModels) {
+        if (abortController.signal.aborted) break;
+        
         try {
-          const cohere = new CohereClientV2({ token: COHERE_API_KEY });
-          const stream = await cohere.chatStream({
-            model: 'command-a-reasoning-08-2025',
-            messages: [{ role: 'user', content: prompt }],
-            thinking: { type: 'enabled', tokenBudget: 8192 },
+          console.log(`Trying direct video summarization with model: ${model}`);
+          const stream = await ai.models.generateContentStream({
+            model,
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  { fileData: { fileUri: videoUrl } },
+                  {
+                    text: 'Summarize this video in clear, concise points. Include key takeaways. Keep the summary readable and well-structured (use markdown line breaks and bullets where helpful).',
+                  },
+                ],
+              },
+            ],
           });
-          for await (const event of stream) {
+
+          for await (const chunk of stream) {
             if (abortController.signal.aborted) break;
-            if (event.type === 'content-delta') {
-              const { thinking, text } = extractCohereDelta(event);
-              if (thinking) {
-                thinkingText += thinking;
-              }
-              if (text) {
-                fullText += text;
-              }
+            const text = chunk.text;
+            if (text) {
+              fullText += text;
             }
           }
-        } catch (cohereErr) {
-          console.error('Cohere failed, trying Gemini fallback:', cohereErr);
-          if (GEMINI_API_KEY && !abortController.signal.aborted) {
-            const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-            const geminiStream = await ai.models.generateContentStream({
-              model: 'gemini-2.0-flash-exp',
-              contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            });
-            for await (const chunk of geminiStream) {
-              if (abortController.signal.aborted) break;
-              const text = chunk.text;
-              if (text) {
-                fullText += text;
-              }
-            }
+
+          if (fullText.trim()) {
+            directMethodSucceeded = true;
+            modelUsed = model;
+            console.log(`Direct video URL summarization succeeded with ${model}`);
+            break; // Success - exit the model loop
           }
-        }
-      } else if (GEMINI_API_KEY) {
-        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-        const geminiStream = await ai.models.generateContentStream({
-          model: 'gemini-2.0-flash-exp',
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        });
-        for await (const chunk of geminiStream) {
-          if (abortController.signal.aborted) break;
-          const text = chunk.text;
-          if (text) {
-            fullText += text;
-          }
+        } catch (modelErr) {
+          console.error(`Model ${model} failed:`, modelErr);
+          fullText = ''; // Reset for next model attempt
+          // Continue to next model in the chain
         }
       }
-    } catch (llmErr) {
-      console.error('LLM summarization failed, will use fallbacks:', llmErr);
+
+      if (!directMethodSucceeded) {
+        console.error('All Gemini models failed for direct video URL, falling back to data gathering');
+      }
     }
 
-    if (abortController.signal.aborted) {
+    // If direct method succeeded, we're done! Skip the slow signal gathering
+    if (directMethodSucceeded && fullText.trim() && !abortController.signal.aborted) {
+      savedSummaries.set(summaryId, {
+        id: summaryId,
+        fingerprint: fp,
+        videoUrl,
+        summary: fullText,
+        createdAt: Date.now(),
+      });
+
+      writeProgress(res, 'complete', 'Summary ready!');
+      res.write(`data: ${JSON.stringify({ summary: fullText, summaryId, credits: getCredits(fp), sources: ['direct'], model: modelUsed, thinking: thinkingText || undefined })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
       return;
     }
 
-    if (!fullText.trim() && GEMINI_API_KEY && !abortController.signal.aborted) {
+    // Direct method failed or was aborted - fall back to data gathering approach
+    if (!abortController.signal.aborted) {
+      writeProgress(res, 'metadata', 'Fetching video information...');
+      
+      let signals: VideoSignals;
+      
       try {
-        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-        const directResult = await ai.models.generateContent({
-          model: 'gemini-2.0-flash-exp',
-          contents: [{
-            role: 'user',
-            parts: [
-              { fileData: { fileUri: videoUrl } },
-              { text: 'Summarize this video in clear, concise points. Include key takeaways. Keep the summary readable and well-structured.' },
-            ],
-          }],
-        });
-        const directText = directResult.text;
-        if (directText?.trim()) {
-          fullText = directText;
-        }
-      } catch (directErr) {
-        console.error('Gemini direct video fallback also failed:', directErr);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Request timed out after 30 seconds')), 30000)
+        );
+        signals = await Promise.race([gatherSignals(videoUrl), timeoutPromise]);
+      } catch (e) {
+        console.error('Signal gathering failed, constructing minimal signals:', e);
+        const videoId = extractVideoId(videoUrl) || 'unknown';
+        signals = {
+          videoId,
+          videoUrl,
+          oembed: null,
+          metadata: null,
+          transcript: null,
+          comments: [],
+          missing: { all: e instanceof Error ? e.message : String(e) },
+        };
       }
+
+      // Report progress: analyzing content
+      if (signals.transcript) {
+        writeProgress(res, 'transcript', `Transcript loaded (${signals.transcript.segmentCount} segments)`);
+      } else {
+        writeProgress(res, 'transcript', 'No transcript available');
+      }
+      
+      if (signals.metadata?.chapters?.length) {
+        writeProgress(res, 'chapters', `${signals.metadata.chapters.length} chapters found`);
+      }
+      
+      if (signals.comments.length) {
+        writeProgress(res, 'comments', `${signals.comments.length} comments loaded`);
+      }
+
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      const signalList = [
+        signals.transcript ? 'transcript' : null,
+        signals.oembed ? 'metadata' : null,
+        signals.metadata?.description ? 'description' : null,
+        signals.metadata?.chapters?.length ? 'chapters' : null,
+        signals.metadata?.tags?.length ? 'tags' : null,
+        signals.comments.length ? 'comments' : null,
+      ].filter(Boolean) as string[];
+
+      writeProgress(res, 'gathering', 'Gathering video data...');
+      
+      const prompt = buildFusionPrompt(signals);
+      writeProgress(res, 'analyzing', 'Analyzing video content...');
+
+      // Stream thinking in real-time during generation
+      let streamedThinking = '';
+      let currentStep = 'analyzing';
+      let stepSent = { analyzing: true, reasoning: false, drafting: false, refining: false };
+
+      const updateStep = (newStep: string) => {
+        if (!stepSent[newStep as keyof typeof stepSent]) {
+          stepSent[newStep as keyof typeof stepSent] = true;
+          currentStep = newStep;
+          const messages: Record<string, string> = {
+            reasoning: 'Extracting key information...',
+            drafting: 'Drafting summary...',
+            refining: 'Refining and formatting...',
+          };
+          writeProgress(res, newStep, messages[newStep] || '');
+        }
+      };
+
+      const streamThinking = (thinking: string) => {
+        if (!thinking) return;
+        streamedThinking += thinking;
+        
+        // Progress through stages based on thinking length
+        if (streamedThinking.length > 100 && !stepSent.reasoning) {
+          updateStep('reasoning');
+        }
+        if (streamedThinking.length > 400 && !stepSent.drafting) {
+          updateStep('drafting');
+        }
+        if (streamedThinking.length > 1000 && !stepSent.refining) {
+          updateStep('refining');
+        }
+        
+        if (res.writableEnded || abortController.signal.aborted) return;
+        res.write(`data: ${JSON.stringify({ progress: { step: 'thinking', thinking } })}\n\n`);
+        (res as any).flush?.();
+      };
+
+      try {
+        if (COHERE_API_KEY) {
+          try {
+            const cohere = new CohereClientV2({ token: COHERE_API_KEY });
+            const stream = await cohere.chatStream({
+              model: 'command-a-reasoning-08-2025',
+              messages: [{ role: 'user', content: prompt }],
+              thinking: { type: 'enabled', tokenBudget: 8192 },
+            });
+            for await (const event of stream) {
+              if (abortController.signal.aborted) break;
+              if (event.type === 'content-delta') {
+                const { thinking, text } = extractCohereDelta(event);
+                if (thinking) {
+                  thinkingText += thinking;
+                  streamThinking(thinking);
+                }
+                if (text) {
+                  fullText += text;
+                }
+              }
+            }
+          } catch (cohereErr) {
+            console.error('Cohere failed, trying Gemini fallback:', cohereErr);
+            if (GEMINI_API_KEY && !abortController.signal.aborted) {
+              const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+              const geminiStream = await ai.models.generateContentStream({
+                model: 'gemini-2.0-flash-exp',
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+              });
+              for await (const chunk of geminiStream) {
+                if (abortController.signal.aborted) break;
+                const text = chunk.text;
+                if (text) {
+                  fullText += text;
+                }
+              }
+            }
+          }
+        } else if (GEMINI_API_KEY) {
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+          const geminiStream = await ai.models.generateContentStream({
+            model: 'gemini-2.0-flash-exp',
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          });
+          for await (const chunk of geminiStream) {
+            if (abortController.signal.aborted) break;
+            const text = chunk.text;
+            if (text) {
+              fullText += text;
+            }
+          }
+        }
+      } catch (llmErr) {
+        console.error('LLM summarization failed, will use fallbacks:', llmErr);
+      }
+
+      // Store streamed thinking for final response
+      thinkingText = streamedThinking;
+
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      // Final fallback if still no summary
+      if (!fullText.trim()) {
+        fullText = buildSignalFallbackSummary(signals);
+      }
+
+      savedSummaries.set(summaryId, {
+        id: summaryId,
+        fingerprint: fp,
+        videoUrl,
+        summary: fullText,
+        createdAt: Date.now(),
+      });
+
+      // Report completion
+      writeProgress(res, 'complete', 'Summary ready!');
+
+      // Send final response via SSE
+      res.write(`data: ${JSON.stringify({ summary: fullText, summaryId, credits: getCredits(fp), sources: signalList, thinking: thinkingText || undefined })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
     }
-
-    if (!fullText.trim()) {
-      fullText = buildSignalFallbackSummary(signals);
-    }
-
-    savedSummaries.set(summaryId, {
-      id: summaryId,
-      fingerprint: fp,
-      videoUrl,
-      summary: fullText,
-      createdAt: Date.now(),
-    });
-
-    // Report completion
-    writeProgress(res, 'complete', 'Summary ready!');
-
-    // Send final response via SSE
-    res.write(`data: ${JSON.stringify({ summary: fullText, summaryId, credits: getCredits(fp), sources: signalList, thinking: thinkingText || undefined })}\n\n`);
-    res.write('data: [DONE]\n\n');
-    res.end();
   } catch (err) {
     if ((err as any)?.name === 'AbortError') {
       if (!res.writableEnded) res.end();

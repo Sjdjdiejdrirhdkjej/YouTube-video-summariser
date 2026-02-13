@@ -31,9 +31,11 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
   const [thinkingText, setThinkingText] = React.useState('');
   const [isThinking, setIsThinking] = React.useState(false);
   const [progressSteps, setProgressSteps] = React.useState<Array<{ step: string; message: string; done: boolean }>>([]);
+  const [showInitialSkeleton, setShowInitialSkeleton] = React.useState(false);
   const thinkingRef = React.useRef('');
   const summaryRef = React.useRef('');
   const abortControllerRef = React.useRef<AbortController | null>(null);
+  const skeletonTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [credits, setCredits] = React.useState<number | null>(null);
 
@@ -53,6 +55,9 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
   React.useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
+      if (skeletonTimeoutRef.current) {
+        clearTimeout(skeletonTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -100,10 +105,16 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
     thinkingRef.current = '';
     summaryRef.current = '';
 
+    // Show initial skeleton after a short delay to avoid flicker for fast responses
+    skeletonTimeoutRef.current = setTimeout(() => {
+      setShowInitialSkeleton(true);
+    }, 300);
+
     try {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
       setProgressSteps([]);
+      setShowInitialSkeleton(false);
 
       const parseSSEResponse = async (r: Response): Promise<{ fullSummary: string; thinking: string; summaryId: string | null; credits: number | null }> => {
         const reader = r.body?.getReader();
@@ -145,16 +156,58 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
               const parsed = JSON.parse(data);
 
               if (parsed.progress) {
-                const { step, message } = parsed.progress;
-                setProgressSteps(prev => {
-                  const idx = prev.findIndex(p => p.step === step);
-                  if (idx >= 0) {
-                    const updated = [...prev];
-                    updated[idx] = { step, message, done: step === 'complete' };
-                    return updated;
+                const { step, message, thinking } = parsed.progress;
+                
+                // Handle streaming thinking in real-time
+                if (thinking) {
+                  thinkingRef.current += thinking;
+                  setThinkingText(thinkingRef.current);
+                  setIsThinking(true);
+                }
+                
+                // Update progress steps - handle both old 'generating' step and new granular steps
+                if (message) {
+                  // Map old 'generating' step to new granular steps if needed
+                  const stepMap: Record<string, string> = {
+                    'generating': 'analyzing',
+                    'analyzing': 'analyzing',
+                    'reasoning': 'reasoning',
+                    'drafting': 'drafting',
+                    'refining': 'refining',
+                  };
+                  const mappedStep = stepMap[step] || step;
+                  
+                  // Only add new granular steps if they don't exist yet
+                  const granularSteps = ['analyzing', 'reasoning', 'drafting', 'refining'];
+                  if (granularSteps.includes(mappedStep)) {
+                    setProgressSteps(prev => {
+                      // Check if we already have more granular steps
+                      const hasGranular = prev.some(p => granularSteps.includes(p.step));
+                      if (hasGranular && mappedStep !== 'thinking') {
+                        // Update existing step
+                        const idx = prev.findIndex(p => p.step === mappedStep);
+                        if (idx >= 0) {
+                          const updated = [...prev];
+                          updated[idx] = { ...updated[idx], message, done: step === 'complete' };
+                          return updated;
+                        }
+                      }
+                      // Add new step
+                      return [...prev, { step: mappedStep, message, done: step === 'complete' }];
+                    });
+                  } else {
+                    // Legacy step handling
+                    setProgressSteps(prev => {
+                      const idx = prev.findIndex(p => p.step === step);
+                      if (idx >= 0) {
+                        const updated = [...prev];
+                        updated[idx] = { step, message, done: step === 'complete' };
+                        return updated;
+                      }
+                      return [...prev, { step, message, done: step === 'complete' }];
+                    });
                   }
-                  return [...prev, { step, message, done: step === 'complete' }];
-                });
+                }
               }
 
               if (parsed.summary) {
@@ -352,14 +405,22 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
           </div>
         )}
 
-        {loading && progressSteps.length === 0 && (
-          <div className="skeleton">
-            <div className="skeleton-line w-full" />
-            <div className="skeleton-line w-3/4" />
-            <div className="skeleton-line w-5/6" />
-            <div className="skeleton-line w-2/3" />
+        {(loading && progressSteps.length === 0) || showInitialSkeleton ? (
+          <div className="initial-loading">
+            <div className="initial-loading-content">
+              <div className="initial-loading-icon">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="23 7 16 12 23 17 23 7"/>
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                </svg>
+              </div>
+              <div className="initial-loading-dots">
+                <span className="dot" /><span className="dot" /><span className="dot" />
+              </div>
+              <p className="initial-loading-text">Analyzing video...</p>
+            </div>
           </div>
-        )}
+        ) : null}
 
         {progressSteps.length > 0 && (
           <div className="progress-panel">
@@ -369,17 +430,38 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
             </div>
             <div className="progress-steps">
               {progressSteps.map((step) => (
-                <div key={step.step} className={`progress-step ${step.done ? 'done' : ''}`}>
-                  <span className="progress-step-indicator">
-                    {step.done ? (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12"/>
-                      </svg>
-                    ) : (
-                      <span className="progress-step-pulse" />
-                    )}
-                  </span>
-                  <span className="progress-step-message">{step.message}</span>
+                <div key={step.step}>
+                  <div className={`progress-step ${step.done ? 'done' : ''}`}>
+                    <span className="progress-step-indicator">
+                      {step.done ? (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                      ) : step.step === 'generating' ? (
+                        <span className="progress-step-pulse" />
+                      ) : (
+                        <span className="progress-step-empty" />
+                      )}
+                    </span>
+                    <span className="progress-step-message">{step.message}</span>
+                  </div>
+                  {/* Show streaming AI thoughts whenever thinking is being streamed */}
+                  {step.step === 'thinking' && (isThinking || thinkingText) && (
+                    <div className="progress-step-thinking">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10"/>
+                          <path d="M12 16v-4"/>
+                          <path d="M12 8h.01"/>
+                        </svg>
+                        <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          {isThinking ? 'AI thinking...' : 'Thought process'}
+                        </span>
+                        {isThinking && <span className="thinking-spinner" />}
+                      </div>
+                      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{thinkingText}</pre>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

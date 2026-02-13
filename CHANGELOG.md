@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Faster summarization with direct video URL first** — the hybrid summarizer now tries Gemini's direct video URL processing first (no YouTube data fetching needed), falling back to the slower transcript/metadata gathering approach only if needed. This significantly reduces wait times for most videos.
+- **Gemini model fallback chain** — direct video URL summarization now tries models in sequence: gemini-3-pro → gemini-2.5-pro → gemini-3-flash → gemini-2.5-flash, automatically falling back to the next model if one fails.
+
 ### Added
 
 - **Multi-layer summarization fallback chain** — every valid YouTube URL now always produces a summary. The pipeline tries: Cohere → Gemini (text-based) → Gemini (direct video mode) → signal-based fallback summary → catch-all minimal summary, ensuring no request ever returns empty.

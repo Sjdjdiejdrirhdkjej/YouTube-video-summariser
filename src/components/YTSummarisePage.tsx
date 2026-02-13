@@ -1,5 +1,6 @@
 import React from 'react';
 import { marked } from 'marked';
+import './manus-theme.css';
 
 interface YTSummarisePageProps {
   onBack: () => void;
@@ -105,7 +106,6 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
     thinkingRef.current = '';
     summaryRef.current = '';
 
-    // Show initial skeleton after a short delay to avoid flicker for fast responses
     skeletonTimeoutRef.current = setTimeout(() => {
       setShowInitialSkeleton(true);
     }, 300);
@@ -158,16 +158,13 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
               if (parsed.progress) {
                 const { step, message, thinking } = parsed.progress;
                 
-                // Handle streaming thinking in real-time
                 if (thinking) {
                   thinkingRef.current += thinking;
                   setThinkingText(thinkingRef.current);
                   setIsThinking(true);
                 }
                 
-                // Update progress steps - handle both old 'generating' step and new granular steps
                 if (message) {
-                  // Map old 'generating' step to new granular steps if needed
                   const stepMap: Record<string, string> = {
                     'generating': 'analyzing',
                     'analyzing': 'analyzing',
@@ -177,14 +174,11 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
                   };
                   const mappedStep = stepMap[step] || step;
                   
-                  // Only add new granular steps if they don't exist yet
                   const granularSteps = ['analyzing', 'reasoning', 'drafting', 'refining'];
                   if (granularSteps.includes(mappedStep)) {
                     setProgressSteps(prev => {
-                      // Check if we already have more granular steps
                       const hasGranular = prev.some(p => granularSteps.includes(p.step));
                       if (hasGranular && mappedStep !== 'thinking') {
-                        // Update existing step
                         const idx = prev.findIndex(p => p.step === mappedStep);
                         if (idx >= 0) {
                           const updated = [...prev];
@@ -192,11 +186,9 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
                           return updated;
                         }
                       }
-                      // Add new step
                       return [...prev, { step: mappedStep, message, done: step === 'complete' }];
                     });
                   } else {
-                    // Legacy step handling
                     setProgressSteps(prev => {
                       const idx = prev.findIndex(p => p.step === step);
                       if (idx >= 0) {
@@ -321,71 +313,105 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
     }
   };
 
+  const hasResults = !!summary || loading || streaming;
+
+  const inputBar = (
+    <div className="manus-input-wrap">
+      <div className="manus-input-bar">
+        <input
+          value={videoUrl}
+          onChange={(e) => setVideoUrl(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSummarize()}
+          type="text"
+          placeholder="Paste a YouTube URL..."
+          className="manus-input"
+          disabled={loading || streaming || retryAfter > 0}
+        />
+        <button
+          type="button"
+          className="manus-send-btn"
+          onClick={handleSummarize}
+          disabled={loading || streaming || retryAfter > 0}
+        >
+          {loading ? (
+            <span className="manus-send-spinner" />
+          ) : retryAfter > 0 ? (
+            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{retryAfter}s</span>
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12" />
+              <polyline points="12 5 19 12 12 19" />
+            </svg>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="ytsummarise">
-      <nav className="ytsummarise-nav">
-        <button type="button" className="back-btn" onClick={onBack}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="19" y1="12" x2="5" y2="12"/>
-            <polyline points="12 19 5 12 12 5"/>
+    <div className="manus-root">
+      <div className="manus-bg-orbs">
+        <div className="manus-orb manus-orb--1" />
+        <div className="manus-orb manus-orb--2" />
+        <div className="manus-orb manus-orb--3" />
+      </div>
+
+      <nav className="manus-nav">
+        <button type="button" className="manus-nav-back" onClick={onBack}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12" />
+            <polyline points="12 19 5 12 12 5" />
           </svg>
           Back
         </button>
-        <span className="ytsummarise-brand">VidGist</span>
-        <div className="ytsummarise-credits">
-          {credits !== null && <span>{credits} credits</span>}
+        <span className="manus-nav-brand">VidGist</span>
+        <div className="manus-nav-credits">
+          {credits !== null ? `${credits} credits` : '\u00A0'}
         </div>
       </nav>
 
-      <div className="ytsummarise-content">
-        {!summary && !loading && (
-          <div className="ytsummarise-input-section">
-            <h1 className="ytsummarise-title">Summarize a YouTube Video</h1>
-            <p className="ytsummarise-subtitle">Paste a YouTube URL to get an AI-powered summary</p>
-            
-            <div className="input-row">
-              <input
-                value={videoUrl}
-                onChange={(e) => setVideoUrl(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSummarize()}
-                type="text"
-                placeholder="Paste a YouTube URL..."
-                className="url-input"
-                disabled={loading || streaming || retryAfter > 0}
-              />
-              <button
-                type="button"
-                className="go-btn"
-                onClick={handleSummarize}
-                disabled={loading || streaming || retryAfter > 0}
-              >
-                {loading ? (
-                  <span className="spinner" />
-                ) : retryAfter > 0 ? (
-                  `${retryAfter}s`
-                ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="5" y1="12" x2="19" y2="12"/>
-                    <polyline points="12 5 19 12 12 19"/>
-                  </svg>
-                )}
-              </button>
+      <div className="manus-content">
+        {!hasResults && (
+          <div className="manus-hero">
+            <div className="manus-hero-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="23 7 16 12 23 17 23 7" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
             </div>
+            <h1 className="manus-hero-title">What would you like to summarize?</h1>
+            <p className="manus-hero-sub">Paste a YouTube URL and get an AI-powered summary in seconds</p>
 
-            <div className="samples">
-              <span className="samples-label">Try:</span>
+            <div className="manus-pills">
               {[
-                { label: 'How AI Works', url: 'https://www.youtube.com/watch?v=aircAruvnKk' },
-                { label: 'History of Internet', url: 'https://www.youtube.com/watch?v=9hIQjrMHTv4' },
-                { label: 'How Computers Work', url: 'https://www.youtube.com/watch?v=QZwneRb-zqA' },
+                { label: 'How AI Works', url: 'https://www.youtube.com/watch?v=aircAruvnKk', icon: (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 0 6h-1v1a4 4 0 0 1-8 0v-1H7a3 3 0 0 1 0-6h1V6a4 4 0 0 1 4-4z" />
+                  </svg>
+                )},
+                { label: 'History of Internet', url: 'https://www.youtube.com/watch?v=9hIQjrMHTv4', icon: (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="2" y1="12" x2="22" y2="12" />
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                  </svg>
+                )},
+                { label: 'How Computers Work', url: 'https://www.youtube.com/watch?v=QZwneRb-zqA', icon: (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                    <line x1="8" y1="21" x2="16" y2="21" />
+                    <line x1="12" y1="17" x2="12" y2="21" />
+                  </svg>
+                )},
               ].map((s) => (
                 <button
                   key={s.url}
                   type="button"
-                  className="sample-link"
+                  className="manus-pill"
                   onClick={() => setVideoUrl(s.url)}
                   disabled={loading || streaming}
                 >
+                  {s.icon}
                   {s.label}
                 </button>
               ))}
@@ -393,73 +419,80 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
           </div>
         )}
 
+        {!hasResults && (
+          <div className="manus-input-bottom">
+            {inputBar}
+          </div>
+        )}
+
         {error && (
-          <div className="error-banner">
+          <div className="manus-error">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="15" y1="9" x2="9" y2="15"/>
-              <line x1="9" y1="9" x2="15" y2="15"/>
+              <circle cx="12" cy="12" r="10" />
+              <line x1="15" y1="9" x2="9" y2="15" />
+              <line x1="9" y1="9" x2="15" y2="15" />
             </svg>
             <span>{error}</span>
-            {retryAfter > 0 && <span className="retry-tag">Retry in {retryAfter}s</span>}
+            {retryAfter > 0 && <span className="manus-retry-tag">Retry in {retryAfter}s</span>}
           </div>
         )}
 
         {(loading && progressSteps.length === 0) || showInitialSkeleton ? (
-          <div className="initial-loading">
-            <div className="initial-loading-content">
-              <div className="initial-loading-icon">
+          <div className="manus-initial-loading">
+            <div className="manus-initial-loading-inner">
+              <div className="manus-initial-loading-icon">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="23 7 16 12 23 17 23 7"/>
-                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                  <polygon points="23 7 16 12 23 17 23 7" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
                 </svg>
               </div>
-              <div className="initial-loading-dots">
-                <span className="dot" /><span className="dot" /><span className="dot" />
+              <div className="manus-initial-dots">
+                <span /><span /><span />
               </div>
-              <p className="initial-loading-text">Analyzing video...</p>
+              <p className="manus-initial-text">Analyzing video...</p>
             </div>
           </div>
         ) : null}
 
         {progressSteps.length > 0 && (
-          <div className="progress-panel">
-            <div className="progress-header">
-              <div className="progress-spinner" />
+          <div className="manus-progress">
+            <div className="manus-progress-header">
+              <span className="manus-progress-spinner" />
               <span>Generating summary...</span>
             </div>
-            <div className="progress-steps">
+            <div className="manus-progress-steps">
               {progressSteps.map((step) => (
                 <div key={step.step}>
-                  <div className={`progress-step ${step.done ? 'done' : ''}`}>
-                    <span className="progress-step-indicator">
+                  <div className={`manus-progress-step${step.done ? ' manus-progress-step--done' : ''}`}>
+                    <span className="manus-step-indicator">
                       {step.done ? (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12"/>
-                        </svg>
+                        <span className="manus-step-check">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        </span>
                       ) : step.step === 'generating' ? (
-                        <span className="progress-step-pulse" />
+                        <span className="manus-step-pulse" />
                       ) : (
-                        <span className="progress-step-empty" />
+                        <span className="manus-step-dot" />
                       )}
                     </span>
-                    <span className="progress-step-message">{step.message}</span>
+                    <span className="manus-step-message">{step.message}</span>
                   </div>
-                  {/* Show streaming AI thoughts whenever thinking is being streamed */}
                   {step.step === 'thinking' && (isThinking || thinkingText) && (
-                    <div className="progress-step-thinking">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                    <div className="manus-step-thinking">
+                      <div className="manus-step-thinking-header">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10"/>
-                          <path d="M12 16v-4"/>
-                          <path d="M12 8h.01"/>
+                          <circle cx="12" cy="12" r="10" />
+                          <path d="M12 16v-4" />
+                          <path d="M12 8h.01" />
                         </svg>
-                        <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        <span className="manus-step-thinking-label">
                           {isThinking ? 'AI thinking...' : 'Thought process'}
                         </span>
-                        {isThinking && <span className="thinking-spinner" />}
+                        {isThinking && <span className="manus-step-thinking-spinner" />}
                       </div>
-                      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{thinkingText}</pre>
+                      <pre>{thinkingText}</pre>
                     </div>
                   )}
                 </div>
@@ -469,22 +502,22 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
         )}
 
         {(isThinking || thinkingText) && (
-          <div className="thinking-panel">
-            <div className="thinking-header">
+          <div className="manus-thinking">
+            <div className="manus-thinking-header">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M12 16v-4"/>
-                <path d="M12 8h.01"/>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4" />
+                <path d="M12 8h.01" />
               </svg>
               <span>{isThinking ? 'Thinking...' : 'Thought process'}</span>
-              {isThinking && <span className="thinking-spinner" />}
+              {isThinking && <span className="manus-thinking-spinner" />}
             </div>
-            <pre className="thinking-content">{thinkingText}</pre>
+            <pre className="manus-thinking-content">{thinkingText}</pre>
           </div>
         )}
 
         {displayedSummary && (
-          <div className="result-card">
+          <div className="manus-result">
             <div
               className={`prose${streaming ? ' streaming' : ''}`}
               dangerouslySetInnerHTML={{ __html: renderedHtml }}
@@ -493,30 +526,26 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
         )}
 
         {summary && !streaming && !loading && summaryId && (
-          <div className="actions">
-            <button type="button" className="action-btn primary" onClick={() => window.location.href = `/${summaryId}/chat`}>
+          <div className="manus-actions">
+            <button type="button" className="manus-action-btn manus-action-btn--primary" onClick={() => window.location.href = `/${summaryId}/chat`}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
               Chat about this
             </button>
-            <button type="button" className="action-btn" onClick={copyLink}>
+            <button type="button" className="manus-action-btn" onClick={copyLink}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
               </svg>
               Copy link
             </button>
           </div>
         )}
 
-        {!loading && !streaming && !error && !displayedSummary && (
-          <div className="empty-state">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" opacity="0.2">
-              <polygon points="23 7 16 12 23 17 23 7"/>
-              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
-            </svg>
-            <p>Paste a YouTube URL to get started</p>
+        {hasResults && !loading && !streaming && summary && (
+          <div className="manus-inline-input">
+            {inputBar}
           </div>
         )}
       </div>

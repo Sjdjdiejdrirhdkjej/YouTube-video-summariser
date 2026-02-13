@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Redesigned summarize page with Manus.im-inspired dark theme** — full-page dark layout (#0a0a0a) with animated gradient orbs, glassmorphism panels, centered hero with "What would you like to summarize?" heading, pill-shaped suggestion buttons, rounded chat-style input bar with gradient send button, and modern glass-effect cards for progress, thinking, and results.
+
 - **Faster summarization with direct video URL first** — the hybrid summarizer now tries Gemini's direct video URL processing first (no YouTube data fetching needed), falling back to the slower transcript/metadata gathering approach only if needed. This significantly reduces wait times for most videos.
 - **Gemini model fallback chain** — direct video URL summarization now tries models in sequence: gemini-3-pro → gemini-2.5-pro → gemini-3-flash → gemini-2.5-flash, automatically falling back to the next model if one fails.
 

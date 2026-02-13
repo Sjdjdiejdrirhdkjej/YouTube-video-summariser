@@ -358,6 +358,13 @@ app.post('/api/summarize', async (req, res) => {
   }
 });
 
+function writeProgress(res: any, step: string, message: string): boolean {
+  if (res.writableEnded) return false;
+  res.write(`data: ${JSON.stringify({ progress: { step, message } })}\n\n`);
+  (res as any).flush?.();
+  return true;
+}
+
 app.post('/api/summarize-hybrid', async (req, res) => {
   let fp: string | null = null;
   let videoUrl = '';
@@ -392,6 +399,15 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       return;
     }
 
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    res.write(': ok\n\n');
+    (res as any).flush?.();
+    writeProgress(res, 'start', 'Starting summarization...');
+
     summaryId = generateSummaryId();
     let fullText = '';
     let thinkingText = '';
@@ -400,6 +416,10 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     req.on('close', () => abortController.abort());
 
     let signals: VideoSignals;
+    
+    // Report progress: fetching video data
+    writeProgress(res, 'metadata', 'Fetching video information...');
+    
     try {
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Request timed out after 30 seconds')), 30000)
@@ -419,6 +439,21 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       };
     }
 
+    // Report progress: analyzing content
+    if (signals.transcript) {
+      writeProgress(res, 'transcript', `Transcript loaded (${signals.transcript.segmentCount} segments)`);
+    } else {
+      writeProgress(res, 'transcript', 'No transcript available');
+    }
+    
+    if (signals.metadata?.chapters?.length) {
+      writeProgress(res, 'chapters', `${signals.metadata.chapters.length} chapters found`);
+    }
+    
+    if (signals.comments.length) {
+      writeProgress(res, 'comments', `${signals.comments.length} comments loaded`);
+    }
+
     if (abortController.signal.aborted) {
       return;
     }
@@ -433,6 +468,9 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     ].filter(Boolean) as string[];
 
     const prompt = buildFusionPrompt(signals);
+
+    // Report progress: generating summary
+    writeProgress(res, 'generating', 'Generating AI summary...');
 
     try {
       if (COHERE_API_KEY) {
@@ -528,15 +566,16 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       createdAt: Date.now(),
     });
 
-    res.json({
-      summary: fullText,
-      summaryId,
-      credits: getCredits(fp),
-      sources: signalList,
-      thinking: thinkingText || undefined,
-    });
+    // Report completion
+    writeProgress(res, 'complete', 'Summary ready!');
+
+    // Send final response via SSE
+    res.write(`data: ${JSON.stringify({ summary: fullText, summaryId, credits: getCredits(fp), sources: signalList, thinking: thinkingText || undefined })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
   } catch (err) {
     if ((err as any)?.name === 'AbortError') {
+      if (!res.writableEnded) res.end();
       return;
     }
     if (handleRateLimit(res, err)) return;
@@ -550,7 +589,10 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       message = 'Network error accessing YouTube. Please try a different video.';
     }
 
-    if (!res.headersSent) {
+    if (res.headersSent && !res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ error: message, credits: fp ? getCredits(fp) : undefined })}\n\n`);
+      res.end();
+    } else if (!res.headersSent) {
       res.status(500).json({ error: message, credits: fp ? getCredits(fp) : undefined });
     }
   }

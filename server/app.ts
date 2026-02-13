@@ -85,6 +85,8 @@ interface SavedSummary {
 }
 
 const savedSummaries = new Map<string, SavedSummary>();
+const summaryCache = new Map<string, { summary: string; createdAt: number }>();
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
 interface SavedChat {
   id: string;
@@ -407,6 +409,25 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     res.write(': ok\n\n');
     (res as any).flush?.();
     writeProgress(res, 'start', 'Starting summarization...');
+
+    // Check cache first
+    const cacheKey = extractVideoId(videoUrl) || videoUrl;
+    const cached = summaryCache.get(cacheKey);
+    if (cached && Date.now() - cached.createdAt < CACHE_TTL) {
+      summaryId = generateSummaryId();
+      savedSummaries.set(summaryId, {
+        id: summaryId,
+        fingerprint: fp,
+        videoUrl,
+        summary: cached.summary,
+        createdAt: Date.now(),
+      });
+      writeProgress(res, 'complete', 'Summary ready!');
+      res.write(`data: ${JSON.stringify({ summary: cached.summary, summaryId, credits: getCredits(fp), sources: ['cache'] })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
 
     summaryId = generateSummaryId();
     let fullText = '';

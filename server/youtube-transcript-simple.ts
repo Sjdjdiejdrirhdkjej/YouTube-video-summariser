@@ -113,14 +113,20 @@ function parseWebVTT(vttContent: string): string {
 export async function fetchTranscript(videoId: string): Promise<TranscriptResult> {
   const invidiousUrls = getInvidiousUrls();
 
-  for (const instanceUrl of invidiousUrls) {
-    const result = await fetchFromInvidious(videoId, instanceUrl);
-    if (result) return result;
+  try {
+    return await Promise.any(
+      invidiousUrls.map(instanceUrl =>
+        fetchFromInvidious(videoId, instanceUrl).then(result => {
+          if (!result) throw new Error(`No transcript from ${instanceUrl}`);
+          return result;
+        })
+      )
+    );
+  } catch {
+    throw new Error(
+      'No transcript available – YouTube may have blocked the request or captions are disabled for this video'
+    );
   }
-
-  throw new Error(
-    'No transcript available – YouTube may have blocked the request or captions are disabled for this video'
-  );
 }
 
 export async function fetchTranscriptList(videoId: string): Promise<any[]> {

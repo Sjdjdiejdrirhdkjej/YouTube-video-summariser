@@ -243,25 +243,6 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
 
       let result = await parseSSEResponse(r);
 
-      if (!result.fullSummary.trim()) {
-        try {
-          setProgressSteps([{ step: 'fallback', message: 'Trying alternative method...', done: false }]);
-          r = await fetch('/api/summarize', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Fingerprint': fingerprint },
-            body: JSON.stringify({ videoUrl: videoUrl.trim(), analysisMode }),
-            signal: abortController.signal,
-          });
-          if (r.ok) {
-            const data = await r.json();
-            if (data.summary?.trim()) {
-              result = { fullSummary: data.summary, thinking: '', summaryId: data.summaryId, credits: data.credits };
-              if (typeof data.credits === 'number') setCredits(data.credits);
-            }
-          }
-        } catch {}
-      }
-
       const { fullSummary, thinking: returnedThinking, summaryId: returnedSummaryId } = result;
 
       if (!fullSummary.trim()) {

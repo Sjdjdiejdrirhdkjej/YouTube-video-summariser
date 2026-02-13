@@ -50,7 +50,7 @@ import cors from 'cors';
 import { GoogleGenAI } from '@google/genai';
 import { CohereClientV2 } from 'cohere-ai';
 import { OpenAI } from 'openai';
-import { gatherSignals, buildFusionPrompt, type VideoSignals } from './youtube.js';
+import { gatherSignals, buildFusionPrompt, extractVideoId, type VideoSignals } from './youtube.js';
 
 const app = express();
 app.use(cors());
@@ -69,6 +69,11 @@ function deductCredits(fp: string, amount: number): boolean {
   if (current < amount) return false;
   fpCredits.set(fp, current - amount);
   return true;
+}
+
+function refundCredits(fp: string, amount: number): void {
+  const current = getCredits(fp);
+  fpCredits.set(fp, current + amount);
 }
 
 interface SavedSummary {
@@ -197,6 +202,10 @@ function buildSignalFallbackSummary(signals: VideoSignals): string {
     sections.push(`## Overview\n\n${signals.metadata.description.slice(0, 1600)}`);
   }
 
+  if (signals.metadata?.tags?.length) {
+    sections.push(`**Topics:** ${signals.metadata.tags.slice(0, 15).join(', ')}`);
+  }
+
   if (signals.metadata?.chapters?.length) {
     const chapterLines = signals.metadata.chapters
       .slice(0, 10)
@@ -210,6 +219,10 @@ function buildSignalFallbackSummary(signals: VideoSignals): string {
     sections.push(`## Chapters\n\n${chapterLines}`);
   }
 
+  if (signals.transcript?.text) {
+    sections.push(`## Transcript Excerpt\n\n${signals.transcript.text.slice(0, 3000)}`);
+  }
+
   if (signals.comments.length) {
     const commentLines = signals.comments
       .slice(0, 3)
@@ -219,8 +232,13 @@ function buildSignalFallbackSummary(signals: VideoSignals): string {
     sections.push(`## Top Comments\n\n${commentLines}`);
   }
 
-  if (!sections.length && signals.transcript?.text) {
-    sections.push(`## Transcript Excerpt\n\n${signals.transcript.text.slice(0, 2000)}`);
+  if (!sections.length) {
+    sections.push(
+      `# Video Summary\n\n` +
+      `This is a YouTube video (${signals.videoUrl}).\n\n` +
+      `We were unable to extract detailed information for an AI-generated summary. ` +
+      `The video may have restricted access, disabled captions, or limited metadata available.`
+    );
   }
 
   return sections.join('\n\n').trim();
@@ -262,6 +280,7 @@ app.post('/api/summarize', async (req, res) => {
     }
 
     if (!GEMINI_API_KEY) {
+      refundCredits(fp, 5);
       res.status(500).json({
         error: 'Summarization is not configured. Set GEMINI_API_KEY.',
       });
@@ -304,6 +323,15 @@ app.post('/api/summarize', async (req, res) => {
     }
 
     if (!fullText.trim()) {
+      try {
+        const signals = await gatherSignals(videoUrl);
+        fullText = buildSignalFallbackSummary(signals);
+      } catch (fallbackErr) {
+        console.error('Signal fallback also failed:', fallbackErr);
+      }
+    }
+
+    if (!fullText.trim()) {
       throw new Error('Summary generation produced no content.');
     }
 
@@ -322,6 +350,7 @@ app.post('/api/summarize', async (req, res) => {
     }
     if (handleRateLimit(res, err)) return;
     console.error('Summarize error:', err);
+    if (fp) refundCredits(fp, 5);
     const message = err instanceof Error ? err.message : String(err);
     if (!res.headersSent) {
       res.status(500).json({ error: message, credits: fp ? getCredits(fp) : undefined });
@@ -356,6 +385,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     }
 
     if (!GEMINI_API_KEY && !COHERE_API_KEY) {
+      refundCredits(fp, 5);
       res.status(500).json({
         error: 'Summarization is not configured. Set GEMINI_API_KEY and/or COHERE_API_KEY.',
       });
@@ -376,7 +406,17 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       );
       signals = await Promise.race([gatherSignals(videoUrl), timeoutPromise]);
     } catch (e) {
-      throw new Error('Could not retrieve any information about this video. The video may be unavailable or restricted.');
+      console.error('Signal gathering failed, constructing minimal signals:', e);
+      const videoId = extractVideoId(videoUrl) || 'unknown';
+      signals = {
+        videoId,
+        videoUrl,
+        oembed: null,
+        metadata: null,
+        transcript: null,
+        comments: [],
+        missing: { all: e instanceof Error ? e.message : String(e) },
+      };
     }
 
     if (abortController.signal.aborted) {
@@ -386,69 +426,98 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     const signalList = [
       signals.transcript ? 'transcript' : null,
       signals.oembed ? 'metadata' : null,
+      signals.metadata?.description ? 'description' : null,
       signals.metadata?.chapters?.length ? 'chapters' : null,
+      signals.metadata?.tags?.length ? 'tags' : null,
       signals.comments.length ? 'comments' : null,
     ].filter(Boolean) as string[];
 
-    if (signalList.length === 0) {
-      throw new Error('Could not analyze the video with any method. The video may be unavailable or restricted.');
-    }
-
     const prompt = buildFusionPrompt(signals);
 
-    if (COHERE_API_KEY) {
-      const cohere = new CohereClientV2({ token: COHERE_API_KEY });
-      const stream = await cohere.chatStream({
-        model: 'command-a-reasoning-08-2025',
-        messages: [{ role: 'user', content: prompt }],
-        thinking: { type: 'enabled', tokenBudget: 8192 },
-      });
-      for await (const event of stream) {
-        if (abortController.signal.aborted) break;
-        if (event.type === 'content-delta') {
-          const { thinking, text } = extractCohereDelta(event);
-          if (thinking) {
-            thinkingText += thinking;
+    try {
+      if (COHERE_API_KEY) {
+        try {
+          const cohere = new CohereClientV2({ token: COHERE_API_KEY });
+          const stream = await cohere.chatStream({
+            model: 'command-a-reasoning-08-2025',
+            messages: [{ role: 'user', content: prompt }],
+            thinking: { type: 'enabled', tokenBudget: 8192 },
+          });
+          for await (const event of stream) {
+            if (abortController.signal.aborted) break;
+            if (event.type === 'content-delta') {
+              const { thinking, text } = extractCohereDelta(event);
+              if (thinking) {
+                thinkingText += thinking;
+              }
+              if (text) {
+                fullText += text;
+              }
+            }
           }
+        } catch (cohereErr) {
+          console.error('Cohere failed, trying Gemini fallback:', cohereErr);
+          if (GEMINI_API_KEY && !abortController.signal.aborted) {
+            const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+            const geminiStream = await ai.models.generateContentStream({
+              model: 'gemini-2.0-flash-exp',
+              contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            });
+            for await (const chunk of geminiStream) {
+              if (abortController.signal.aborted) break;
+              const text = chunk.text;
+              if (text) {
+                fullText += text;
+              }
+            }
+          }
+        }
+      } else if (GEMINI_API_KEY) {
+        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+        const geminiStream = await ai.models.generateContentStream({
+          model: 'gemini-2.0-flash-exp',
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        });
+        for await (const chunk of geminiStream) {
+          if (abortController.signal.aborted) break;
+          const text = chunk.text;
           if (text) {
             fullText += text;
           }
         }
       }
-    } else if (GEMINI_API_KEY) {
-      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-      const geminiStream = await ai.models.generateContentStream({
-        model: 'gemini-2.0-flash-exp',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      });
-      for await (const chunk of geminiStream) {
-        if (abortController.signal.aborted) break;
-        const text = chunk.text;
-        if (text) {
-          fullText += text;
-        }
-      }
-    } else {
-      const metaParts: string[] = [];
-      if (signals.oembed) metaParts.push(`**${signals.oembed.title}** by ${signals.oembed.authorName}`);
-      if (signals.metadata?.description) metaParts.push(signals.metadata.description);
-      if (signals.transcript) metaParts.push(`Transcript: ${signals.transcript.text.slice(0, 5000)}`);
-      fullText = metaParts.join('\n\n');
+    } catch (llmErr) {
+      console.error('LLM summarization failed, will use fallbacks:', llmErr);
     }
 
     if (abortController.signal.aborted) {
       return;
     }
 
-    if (!fullText.trim()) {
-      const fallbackSummary = buildSignalFallbackSummary(signals);
-      if (fallbackSummary) {
-        fullText = fallbackSummary;
+    if (!fullText.trim() && GEMINI_API_KEY && !abortController.signal.aborted) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+        const directResult = await ai.models.generateContent({
+          model: 'gemini-2.0-flash-exp',
+          contents: [{
+            role: 'user',
+            parts: [
+              { fileData: { fileUri: videoUrl } },
+              { text: 'Summarize this video in clear, concise points. Include key takeaways. Keep the summary readable and well-structured.' },
+            ],
+          }],
+        });
+        const directText = directResult.text;
+        if (directText?.trim()) {
+          fullText = directText;
+        }
+      } catch (directErr) {
+        console.error('Gemini direct video fallback also failed:', directErr);
       }
     }
 
     if (!fullText.trim()) {
-      throw new Error('Summary generation produced no content.');
+      fullText = buildSignalFallbackSummary(signals);
     }
 
     savedSummaries.set(summaryId, {
@@ -472,6 +541,8 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     }
     if (handleRateLimit(res, err)) return;
     console.error('Hybrid summarize error:', err);
+
+    if (fp) refundCredits(fp, 5);
 
     let message = err instanceof Error ? err.message : String(err);
 

@@ -13,10 +13,8 @@ All notable changes to this project will be documented in this file.
 
 - **Parallel Invidious transcript fetching** — transcript requests to multiple Invidious instances now race in parallel via `Promise.any()` instead of trying sequentially, significantly reducing latency.
 - **Deduplicated YouTube watch page fetch** — metadata and comments are now parsed from a single watch page fetch instead of two separate requests, halving network calls in `gatherSignals()`.
+- **Removed frontend double API call** — the frontend no longer falls back to a second `/api/summarize` call when the hybrid endpoint returns empty, eliminating a potential 30s+ extra wait.
 - **Redesigned summarize page with Manus.im-inspired dark theme** — full-page dark layout (#0a0a0a) with animated gradient orbs, glassmorphism panels, centered hero with "What would you like to summarize?" heading, pill-shaped suggestion buttons, rounded chat-style input bar with gradient send button, and modern glass-effect cards for progress, thinking, and results.
-
-- **Faster summarization with direct video URL first** — the hybrid summarizer now tries Gemini's direct video URL processing first (no YouTube data fetching needed), falling back to the slower transcript/metadata gathering approach only if needed. This significantly reduces wait times for most videos.
-- **Gemini model fallback chain** — direct video URL summarization now tries models in sequence: gemini-3-pro → gemini-2.5-pro → gemini-3-flash → gemini-2.5-flash, automatically falling back to the next model if one fails.
 
 ### Added
 

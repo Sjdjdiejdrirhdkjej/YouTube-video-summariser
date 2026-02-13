@@ -298,7 +298,7 @@ app.post('/api/summarize', async (req, res) => {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
     const stream = await ai.models.generateContentStream({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-3-pro',
       contents: [
         {
           role: 'user',
@@ -362,7 +362,8 @@ app.post('/api/summarize', async (req, res) => {
 
 function writeProgress(res: any, step: string, message: string): boolean {
   if (res.writableEnded) return false;
-  res.write(`data: ${JSON.stringify({ progress: { step, message } })}\n\n`);
+  const timestamp = Date.now();
+  res.write(`data: ${JSON.stringify({ progress: { step, message, timestamp } })}\n\n`);
   (res as any).flush?.();
   return true;
 }
@@ -408,7 +409,8 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     res.flushHeaders();
     res.write(': ok\n\n');
     (res as any).flush?.();
-    writeProgress(res, 'start', 'Starting summarization...');
+    writeProgress(res, 'start', 'Initializing summarization...');
+    writeProgress(res, 'validating', 'Validating video URL...');
 
     // Check cache first
     const cacheKey = extractVideoId(videoUrl) || videoUrl;
@@ -432,16 +434,20 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     summaryId = generateSummaryId();
     let fullText = '';
     let thinkingText = '';
+    const startTime = Date.now();
 
     const abortController = new AbortController();
     req.on('close', () => abortController.abort());
 
     // Try direct video URL summarization FIRST (fastest - no need to fetch transcript/metadata)
     writeProgress(res, 'analyzing', 'Analyzing video content...');
+    writeProgress(res, 'processing', 'Processing video with AI...');
+    
     let directMethodSucceeded = false;
     let modelUsed = '';
+    let streamedThinking = '';
 
-    const directModels = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+    const directModels = ['gemini-3-pro', 'gemini-2.5-flash'];
     
     if (GEMINI_API_KEY) {
       const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
@@ -452,6 +458,14 @@ app.post('/api/summarize-hybrid', async (req, res) => {
           promise.then(v => { clearTimeout(timer); resolve(v); }, e => { clearTimeout(timer); reject(e); });
         });
       };
+      
+      // Send periodic updates so user doesn't see "analyzing" forever
+      const progressInterval = setInterval(() => {
+        if (!abortController.signal.aborted && !res.writableEnded) {
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          writeProgress(res, 'processing', `Processing video with AI... (${elapsed}s)`);
+        }
+      }, 3000);
       
       try {
         const result = await raceWithTimeout(
@@ -476,20 +490,39 @@ app.post('/api/summarize-hybrid', async (req, res) => {
             let text = '';
             for await (const chunk of stream) {
               if (abortController.signal.aborted) throw new Error('Aborted');
-              if (chunk.text) text += chunk.text;
+              // Stream thinking-like progress based on content length
+              if (chunk.text) {
+                text += chunk.text;
+                // Send thinking-like updates
+                if (text.length > 50 && text.length < 500 && !streamedThinking.includes('Extracting')) {
+                  streamedThinking += '📝 Extracting key information from video...\n';
+                  if (!res.writableEnded) {
+                    res.write(`data: ${JSON.stringify({ progress: { step: 'thinking', thinking: streamedThinking } })}\n\n`);
+                    (res as any).flush?.();
+                  }
+                } else if (text.length >= 500 && !streamedThinking.includes('Synthesizing')) {
+                  streamedThinking += '✨ Synthesizing summary...';
+                  if (!res.writableEnded) {
+                    res.write(`data: ${JSON.stringify({ progress: { step: 'thinking', thinking: streamedThinking } })}\n\n`);
+                    (res as any).flush?.();
+                  }
+                }
+              }
             }
             
             if (!text.trim()) throw new Error('Empty response');
             return { text, model };
           })),
-          25_000 // 25 second timeout for the entire race
+          15_000 // 15 second timeout for the entire race
         );
         
+        clearInterval(progressInterval);
         fullText = result.text;
         modelUsed = result.model;
         directMethodSucceeded = true;
         console.log(`Direct video URL summarization succeeded with ${result.model}`);
       } catch (raceErr) {
+        clearInterval(progressInterval);
         console.error('All direct Gemini models failed or timed out:', raceErr);
       }
     }
@@ -506,7 +539,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       summaryCache.set(cacheKey, { summary: fullText, createdAt: Date.now() });
 
       writeProgress(res, 'complete', 'Summary ready!');
-      res.write(`data: ${JSON.stringify({ summary: fullText, summaryId, credits: getCredits(fp), sources: ['direct'], model: modelUsed, thinking: thinkingText || undefined })}\n\n`);
+      res.write(`data: ${JSON.stringify({ summary: fullText, summaryId, credits: getCredits(fp), sources: ['direct'], model: modelUsed, thinking: streamedThinking || undefined })}\n\n`);
       res.write('data: [DONE]\n\n');
       res.end();
       return;
@@ -514,13 +547,14 @@ app.post('/api/summarize-hybrid', async (req, res) => {
 
     // Direct method failed or was aborted - fall back to data gathering approach
     if (!abortController.signal.aborted) {
+      writeProgress(res, 'fallback', 'Direct video analysis timed out, gathering video data...');
       writeProgress(res, 'metadata', 'Fetching video information...');
       
       let signals: VideoSignals;
       
       try {
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Request timed out after 30 seconds')), 30000)
+          setTimeout(() => reject(new Error('Request timed out after 20 seconds')), 20000)
         );
         signals = await Promise.race([gatherSignals(videoUrl), timeoutPromise]);
       } catch (e) {
@@ -539,17 +573,29 @@ app.post('/api/summarize-hybrid', async (req, res) => {
 
       // Report progress: analyzing content
       if (signals.transcript) {
-        writeProgress(res, 'transcript', `Transcript loaded (${signals.transcript.segmentCount} segments)`);
+        const transcriptLength = signals.transcript.text.length;
+        const lengthInfo = transcriptLength > 10000 ? ` (${Math.round(transcriptLength/1000)}k chars)` : '';
+        writeProgress(res, 'transcript', `Transcript loaded: ${signals.transcript.segmentCount} segments${lengthInfo}`);
       } else {
-        writeProgress(res, 'transcript', 'No transcript available');
+        writeProgress(res, 'transcript', 'No transcript available - using metadata only');
       }
       
       if (signals.metadata?.chapters?.length) {
         writeProgress(res, 'chapters', `${signals.metadata.chapters.length} chapters found`);
       }
       
+      if (signals.metadata?.description) {
+        const descLen = signals.metadata.description.length;
+        writeProgress(res, 'description', `Description loaded (${descLen} chars)`);
+      }
+      
       if (signals.comments.length) {
         writeProgress(res, 'comments', `${signals.comments.length} comments loaded`);
+      }
+      
+      if (Object.keys(signals.missing).length > 0) {
+        const missingList = Object.keys(signals.missing).join(', ');
+        writeProgress(res, 'missing', `Unavailable: ${missingList}`);
       }
 
       if (abortController.signal.aborted) {
@@ -631,7 +677,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
             if (GEMINI_API_KEY && !abortController.signal.aborted) {
               const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
               const geminiStream = await ai.models.generateContentStream({
-                model: 'gemini-2.0-flash-exp',
+                model: 'gemini-3-pro',
                 contents: [{ role: 'user', parts: [{ text: prompt }] }],
               });
               for await (const chunk of geminiStream) {
@@ -646,7 +692,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
         } else if (GEMINI_API_KEY) {
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const geminiStream = await ai.models.generateContentStream({
-            model: 'gemini-2.0-flash-exp',
+            model: 'gemini-3-pro',
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
           });
           for await (const chunk of geminiStream) {

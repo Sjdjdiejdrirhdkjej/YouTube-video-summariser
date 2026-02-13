@@ -260,23 +260,27 @@ export async function fetchTranscript(videoUrl: string): Promise<TranscriptData>
   const videoId = extractVideoId(videoUrl);
   if (!videoId) throw new Error('Invalid YouTube URL');
 
-  const errors: string[] = [];
+  // Race both providers in parallel - use whichever succeeds first
+  const raceWithTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Timeout')), ms);
+      promise.then(v => { clearTimeout(timer); resolve(v); }, e => { clearTimeout(timer); reject(e); });
+    });
+  };
 
   try {
-    return await fetchTranscriptPlayzone(videoId);
+    return await raceWithTimeout(
+      Promise.any([
+        fetchTranscriptPlayzone(videoId),
+        fetchTranscriptInvidious(videoId),
+      ]),
+      15_000 // 15 second timeout for transcript fetch
+    );
   } catch (e) {
-    errors.push(`playzone: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(
+      'Empty transcript \u2013 YouTube may have blocked the request or captions are disabled for this video'
+    );
   }
-
-  try {
-    return await fetchTranscriptInvidious(videoId);
-  } catch (e) {
-    errors.push(`invidious: ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  throw new Error(
-    'Empty transcript \u2013 YouTube may have blocked the request or captions are disabled for this video'
-  );
 }
 
 export function parseCommentsFromHtml(html: string): Comment[] {

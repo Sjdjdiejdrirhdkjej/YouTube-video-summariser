@@ -31,14 +31,54 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
   const [summaryId, setSummaryId] = React.useState<string | null>(null);
   const [thinkingText, setThinkingText] = React.useState('');
   const [isThinking, setIsThinking] = React.useState(false);
-  const [progressSteps, setProgressSteps] = React.useState<Array<{ step: string; message: string; done: boolean }>>([]);
+  const [progressSteps, setProgressSteps] = React.useState<Array<{ step: string; message: string; done: boolean; timestamp?: number }>>([]);
   const [showInitialSkeleton, setShowInitialSkeleton] = React.useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = React.useState(0);
+  const [progressPercent, setProgressPercent] = React.useState(0);
+
+  // Timer to update elapsed time
+  React.useEffect(() => {
+    if (!loading) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setElapsedSeconds(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [loading]);
+
+  // Calculate progress percentage based on completed steps
+  React.useEffect(() => {
+    if (!loading) {
+      setProgressPercent(0);
+      return;
+    }
+    if (progressSteps.length === 0) {
+      setProgressPercent(5); // Initial step
+      return;
+    }
+    const doneCount = progressSteps.filter(s => s.done).length;
+    const total = progressSteps.length;
+    const base = Math.round((doneCount / total) * 80);
+    
+    // Add time-based bonus for current step
+    const currentStep = progressSteps.find(s => !s.done);
+    if (currentStep && currentStep.timestamp) {
+      const stepElapsed = (Date.now() - currentStep.timestamp) / 1000;
+      const timeBonus = Math.min(stepElapsed / 3, 15);
+      setProgressPercent(Math.min(Math.round(base + timeBonus), 95));
+    } else {
+      setProgressPercent(base);
+    }
+  }, [loading, progressSteps]);
   const thinkingRef = React.useRef('');
   const summaryRef = React.useRef('');
   const abortControllerRef = React.useRef<AbortController | null>(null);
   const skeletonTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [credits, setCredits] = React.useState<number | null>(null);
+  const [sources, setSources] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     fetch('/api/credits', { headers: { 'X-Fingerprint': fingerprint } })
@@ -103,6 +143,8 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
     setSummaryId(null);
     setThinkingText('');
     setIsThinking(false);
+    setSources([]);
+    setProgressPercent(0);
     thinkingRef.current = '';
     summaryRef.current = '';
 
@@ -156,7 +198,7 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
               const parsed = JSON.parse(data);
 
               if (parsed.progress) {
-                const { step, message, thinking } = parsed.progress;
+                const { step, message, thinking, timestamp } = parsed.progress;
                 
                 if (thinking) {
                   thinkingRef.current += thinking;
@@ -171,10 +213,20 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
                     'reasoning': 'reasoning',
                     'drafting': 'drafting',
                     'refining': 'refining',
+                    'processing': 'processing',
+                    'validating': 'validating',
+                    'fallback': 'fallback',
+                    'metadata': 'metadata',
+                    'transcript': 'transcript',
+                    'chapters': 'chapters',
+                    'description': 'description',
+                    'comments': 'comments',
+                    'missing': 'missing',
+                    'gathering': 'gathering',
                   };
                   const mappedStep = stepMap[step] || step;
                   
-                  const granularSteps = ['analyzing', 'reasoning', 'drafting', 'refining'];
+                  const granularSteps = ['analyzing', 'reasoning', 'drafting', 'refining', 'processing'];
                   if (granularSteps.includes(mappedStep)) {
                     setProgressSteps(prev => {
                       const hasGranular = prev.some(p => granularSteps.includes(p.step));
@@ -182,21 +234,21 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
                         const idx = prev.findIndex(p => p.step === mappedStep);
                         if (idx >= 0) {
                           const updated = [...prev];
-                          updated[idx] = { ...updated[idx], message, done: step === 'complete' };
+                          updated[idx] = { ...updated[idx], message, done: step === 'complete', timestamp };
                           return updated;
                         }
                       }
-                      return [...prev, { step: mappedStep, message, done: step === 'complete' }];
+                      return [...prev, { step: mappedStep, message, done: step === 'complete', timestamp }];
                     });
                   } else {
                     setProgressSteps(prev => {
                       const idx = prev.findIndex(p => p.step === step);
                       if (idx >= 0) {
                         const updated = [...prev];
-                        updated[idx] = { step, message, done: step === 'complete' };
+                        updated[idx] = { step, message, done: step === 'complete', timestamp };
                         return updated;
                       }
-                      return [...prev, { step, message, done: step === 'complete' }];
+                      return [...prev, { step, message, done: step === 'complete', timestamp }];
                     });
                   }
                 }
@@ -210,6 +262,11 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
                   credits = parsed.credits;
                   setCredits(parsed.credits);
                 }
+                if (Array.isArray(parsed.sources)) {
+                  setSources(parsed.sources);
+                }
+                // Mark complete
+                setProgressPercent(100);
               }
 
               if (parsed.error) {
@@ -440,44 +497,85 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
             <div className="manus-progress-header">
               <span className="manus-progress-spinner" />
               <span>Generating summary...</span>
+              {progressSteps.length > 0 && (
+                <span className="manus-progress-time">
+                  {elapsedSeconds < 5 ? 'just now' : elapsedSeconds < 60 ? `${elapsedSeconds}s elapsed` : `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`}
+                </span>
+              )}
+              <button
+                type="button"
+                className="manus-cancel-btn"
+                onClick={() => {
+                  abortControllerRef.current?.abort();
+                  setLoading(false);
+                  setError('');
+                  setProgressSteps([]);
+                  setShowInitialSkeleton(false);
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+                Cancel
+              </button>
+            </div>
+            <div className="manus-progress-bar-wrap">
+              <div 
+                className="manus-progress-bar" 
+                style={{ width: `${progressPercent}%` }}
+              />
             </div>
             <div className="manus-progress-steps">
-              {progressSteps.map((step) => (
-                <div key={step.step}>
-                  <div className={`manus-progress-step${step.done ? ' manus-progress-step--done' : ''}`}>
-                    <span className="manus-step-indicator">
-                      {step.done ? (
-                        <span className="manus-step-check">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="20 6 9 17 4 12" />
-                          </svg>
+              {progressSteps.map((step, idx) => {
+                const isCurrentStep = !step.done && idx === progressSteps.filter(p => p.done).length;
+                return (
+                  <div key={step.step + idx} className={isCurrentStep ? 'manus-progress-step--active' : ''}>
+                    <div className={`manus-progress-step${step.done ? ' manus-progress-step--done' : ''}`}>
+                      <span className="manus-step-indicator">
+                        {step.done ? (
+                          <span className="manus-step-check">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          </span>
+                        ) : isCurrentStep ? (
+                          <span className="manus-step-pulse" />
+                        ) : (
+                          <span className="manus-step-dot" />
+                        )}
+                      </span>
+                      <span className="manus-step-message">{step.message}</span>
+                      {step.timestamp && (
+                        <span className="manus-step-timestamp">
+                          {(() => {
+                            const elapsed = Math.floor((Date.now() - step.timestamp) / 1000);
+                            if (elapsed < 2) return '';
+                            if (elapsed < 60) return `+${elapsed}s`;
+                            return `+${Math.floor(elapsed / 60)}m`;
+                          })()}
                         </span>
-                      ) : step.step === 'generating' ? (
-                        <span className="manus-step-pulse" />
-                      ) : (
-                        <span className="manus-step-dot" />
                       )}
-                    </span>
-                    <span className="manus-step-message">{step.message}</span>
-                  </div>
-                  {step.step === 'thinking' && (isThinking || thinkingText) && (
-                    <div className="manus-step-thinking">
-                      <div className="manus-step-thinking-header">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10" />
-                          <path d="M12 16v-4" />
-                          <path d="M12 8h.01" />
-                        </svg>
-                        <span className="manus-step-thinking-label">
-                          {isThinking ? 'AI thinking...' : 'Thought process'}
-                        </span>
-                        {isThinking && <span className="manus-step-thinking-spinner" />}
-                      </div>
-                      <pre>{thinkingText}</pre>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {step.step === 'thinking' && (isThinking || thinkingText) && (
+                      <div className="manus-step-thinking">
+                        <div className="manus-step-thinking-header">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 16v-4" />
+                            <path d="M12 8h.01" />
+                          </svg>
+                          <span className="manus-step-thinking-label">
+                            {isThinking ? 'AI thinking...' : 'Thought process'}
+                          </span>
+                          {isThinking && <span className="manus-step-thinking-spinner" />}
+                        </div>
+                        <pre>{thinkingText}</pre>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -499,6 +597,24 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
 
         {displayedSummary && (
           <div className="manus-result">
+            {sources.includes('cache') && (
+              <div className="manus-source-badge manus-source-badge--cache">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                  <line x1="12" y1="22.08" x2="12" y2="12" />
+                </svg>
+                Cached summary
+              </div>
+            )}
+            {!sources.includes('cache') && sources.length > 0 && (
+              <div className="manus-source-badge manus-source-badge--fresh">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                </svg>
+                Freshly generated
+              </div>
+            )}
             <div
               className={`prose${streaming ? ' streaming' : ''}`}
               dangerouslySetInnerHTML={{ __html: renderedHtml }}

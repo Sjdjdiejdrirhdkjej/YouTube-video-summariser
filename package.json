@@ -44,6 +44,7 @@
     "marked": "^17.0.1",
     "openai": "^6.21.0",
     "opencode-ai": "^1.1.56",
+    "opencode-swarm": "^5.1.0",
     "p-limit": "^7.3.0",
     "p-retry": "^7.1.1",
     "react-instantsearch": "^7.23.2",

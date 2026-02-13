@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Parallel Gemini model racing** — direct video summarization now races `gemini-2.5-flash` and `gemini-2.0-flash` in parallel via `Promise.any()` with a 25-second timeout, replacing the sequential 4-model fallback chain for much faster responses.
+- **Video summary caching** — summaries are cached by video ID for 24 hours, returning instant results for repeated requests.
+- **Disabled Cohere thinking for summarization** — Cohere summarization no longer uses the reasoning/thinking mode, reducing latency and token usage.
+- **Reduced transcript size** — `MAX_TRANSCRIPT_CHARS` reduced from 60,000 to 20,000 for faster processing.
+
 - **Parallel Invidious transcript fetching** — transcript requests to multiple Invidious instances now race in parallel via `Promise.any()` instead of trying sequentially, significantly reducing latency.
 - **Deduplicated YouTube watch page fetch** — metadata and comments are now parsed from a single watch page fetch instead of two separate requests, halving network calls in `gatherSignals()`.
 - **Redesigned summarize page with Manus.im-inspired dark theme** — full-page dark layout (#0a0a0a) with animated gradient orbs, glassmorphism panels, centered hero with "What would you like to summarize?" heading, pill-shaped suggestion buttons, rounded chat-style input bar with gradient send button, and modern glass-effect cards for progress, thinking, and results.

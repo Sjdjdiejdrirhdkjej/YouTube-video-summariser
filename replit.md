@@ -51,7 +51,7 @@ These signals are fused into a prompt for the AI model.
 
 ### AI Integration Flow
 - **Gemini path** (`/api/summarize`): Uses `@google/genai` / `@google/generative-ai` with `gemini-2.0-flash-exp` for direct video processing
-- **Hybrid path** (`/api/summarize-hybrid`): Gathers all YouTube signals, builds a fusion prompt, sends to Cohere `command-a-03-2025` (or `command-a-reasoning-08-2025` for thinking), streams response via SSE
+- **Hybrid path** (`/api/summarize-hybrid`): Gathers all YouTube signals, builds a fusion prompt, sends to Cohere `command-a-reasoning-08-2025`, streams response via SSE
 - **Chat**: Uses Cohere for conversational follow-up about summaries
 - **Thinking display**: AI reasoning/thinking tokens are streamed to the client and shown in a collapsible panel
 
@@ -78,7 +78,7 @@ The `server/replit_integrations/` directory contains pre-scaffolded integration 
 
 ### AI Services (Required)
 - **Google Gemini API** (`GEMINI_API_KEY`) — Used for direct video summarization via `@google/genai` and `@google/generative-ai` packages
-- **Cohere API** (`COHERE_API_KEY`) — Used for hybrid transcript fusion summarization and chat via `cohere-ai` package. Model: `command-a-03-2025` / `command-a-reasoning-08-2025`
+- **Cohere API** (`COHERE_API_KEY`) — Used for hybrid transcript fusion summarization and chat via `cohere-ai` package. Model: `command-a-reasoning-08-2025`
 
 ### AI Services (Optional / Scaffolded)
 - **Replit AI Model Farm** (`AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL`) — OpenAI-compatible API for image generation, audio, and chat. Only used by integration template files, not the main app.

@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Updated Cohere model to Command A Reasoning** — switched from `command-a-03-2025` to `command-a-reasoning-08-2025` for improved reasoning capabilities in summarization and chat.
+
 - **Parallel Gemini model racing** — direct video summarization now races `gemini-2.5-flash` and `gemini-2.0-flash` in parallel via `Promise.any()` with a 25-second timeout, replacing the sequential 4-model fallback chain for much faster responses.
 - **Video summary caching** — summaries are cached by video ID for 24 hours, returning instant results for repeated requests.
 - **Disabled Cohere thinking for summarization** — Cohere summarization no longer uses the reasoning/thinking mode, reducing latency and token usage.

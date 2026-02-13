@@ -28,7 +28,7 @@ COHERE_API_KEY=your_cohere_api_key
 ```
 
 - `GEMINI_API_KEY`: Required for `/api/summarize` (uses gemini-2.0-flash-exp)
-- `COHERE_API_KEY`: Required for `/api/summarize-hybrid` (uses command-a-03-2025) and chat functionality
+- `COHERE_API_KEY`: Required for `/api/summarize-hybrid` (uses command-a-reasoning-08-2025) and chat functionality
 
 ## API Endpoints
 

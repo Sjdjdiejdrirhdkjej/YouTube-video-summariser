@@ -134,35 +134,48 @@ export default function App() {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
-      const res = await fetch('/api/summarize-hybrid', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Fingerprint': fingerprint },
-        body: JSON.stringify({ videoUrl: videoUrl.trim(), analysisMode }),
-        signal: abortController.signal,
-      });
+      const callEndpoint = async (endpoint: string): Promise<{ payload: Record<string, unknown>; ok: boolean; status: number }> => {
+        const r = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Fingerprint': fingerprint },
+          body: JSON.stringify({ videoUrl: videoUrl.trim(), analysisMode }),
+          signal: abortController.signal,
+        });
+        let d: unknown = {};
+        try { d = await r.json(); } catch { d = {}; }
+        const payload = typeof d === 'object' && d !== null ? d as Record<string, unknown> : {};
+        return { payload, ok: r.ok, status: r.status };
+      };
 
-      let data: unknown = {};
-      try {
-        data = await res.json();
-      } catch {
-        data = {};
+      const extractSummary = (p: Record<string, unknown>): string =>
+        typeof p.summary === 'string' ? p.summary
+          : (typeof p.text === 'string' ? p.text : '');
+
+      let result = await callEndpoint('/api/summarize-hybrid');
+
+      if (!extractSummary(result.payload).trim()) {
+        try {
+          const fallback = await callEndpoint('/api/summarize');
+          if (extractSummary(fallback.payload).trim()) {
+            result = fallback;
+          }
+        } catch {
+          // fallback failed, use original result
+        }
       }
 
-      const payload = typeof data === 'object' && data !== null
-        ? data as Record<string, unknown>
-        : {};
+      const { payload, ok, status } = result;
+      const payloadCredits = payload.credits;
+      if (typeof payloadCredits === 'number') setCredits(payloadCredits);
 
-      const credits = payload.credits;
-      if (typeof credits === 'number') setCredits(credits);
-
-      if (!res.ok) {
+      if (!ok && !extractSummary(payload).trim()) {
         const retryAfterValue = payload.retryAfter;
         if (typeof retryAfterValue === 'number' && retryAfterValue > 0) {
           setRetryAfter(retryAfterValue);
         }
         const errorMessage = typeof payload.error === 'string'
           ? payload.error
-          : `Request failed (${res.status})`;
+          : `Request failed (${status})`;
         setError(errorMessage);
         setLoading(false);
         setStreaming(false);
@@ -182,12 +195,10 @@ export default function App() {
         setIsThinking(false);
       }
 
-      const fullSummary = typeof payload.summary === 'string'
-        ? payload.summary
-        : (typeof payload.text === 'string' ? payload.text : '');
+      const fullSummary = extractSummary(payload);
 
       if (!fullSummary.trim()) {
-        setError('No summary was returned for this video. Please try another video.');
+        setError('Could not generate a summary for this video. The video may be unavailable or restricted.');
         setLoading(false);
         setStreaming(false);
         abortControllerRef.current = null;

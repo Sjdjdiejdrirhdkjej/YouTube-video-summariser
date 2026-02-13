@@ -168,6 +168,7 @@ export default function App() {
 
       let buffer = '';
       let stopped = false;
+      let streamErrored = false;
 
       const tickAnimation = () => {
         const target = summaryRef.current;
@@ -201,17 +202,18 @@ export default function App() {
 
           if (!dataLines.length) continue;
 
-          const data = dataLines.join('\n');
-          if (data === '[DONE]') {
-            stopped = true;
-            break;
-          }
+            const data = dataLines.join('\n');
+            if (data === '[DONE]') {
+              stopped = true;
+              break;
+            }
 
           try {
             const parsed = JSON.parse(data);
             if (parsed.error) {
               if (parsed.retryAfter) setRetryAfter(parsed.retryAfter);
               setError(parsed.error);
+              streamErrored = true;
               stopped = true;
               break;
             }
@@ -224,11 +226,14 @@ export default function App() {
               setThinkingText(thinkingRef.current);
               setIsThinking(true);
             }
-            if (parsed.text) {
+            const chunkText = typeof parsed.text === 'string'
+              ? parsed.text
+              : (typeof parsed.summary === 'string' ? parsed.summary : '');
+            if (chunkText) {
               if (thinkingRef.current) {
                 setIsThinking(false);
               }
-              summaryRef.current += parsed.text;
+              summaryRef.current += chunkText;
               setSummary(summaryRef.current);
             }
           } catch {
@@ -237,10 +242,57 @@ export default function App() {
         }
       }
 
+      if (buffer.trim() && !stopped) {
+        const dataLines = buffer
+          .split('\n')
+          .filter((l) => l.startsWith('data:'))
+          .map((l) => l.slice(5).replace(/^ /, ''));
+
+        if (dataLines.length) {
+          const data = dataLines.join('\n');
+          if (data === '[DONE]') {
+            stopped = true;
+          } else {
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.error) {
+                if (parsed.retryAfter) setRetryAfter(parsed.retryAfter);
+                setError(parsed.error);
+                streamErrored = true;
+              }
+              if (parsed.credits !== undefined) setCredits(parsed.credits);
+              if (parsed.summaryId) {
+                setSummaryId(parsed.summaryId);
+              }
+              if (parsed.thinking) {
+                thinkingRef.current += parsed.thinking;
+                setThinkingText(thinkingRef.current);
+                setIsThinking(true);
+              }
+              const chunkText = typeof parsed.text === 'string'
+                ? parsed.text
+                : (typeof parsed.summary === 'string' ? parsed.summary : '');
+              if (chunkText) {
+                if (thinkingRef.current) {
+                  setIsThinking(false);
+                }
+                summaryRef.current += chunkText;
+                setSummary(summaryRef.current);
+              }
+            } catch {
+              // ignore parse errors
+            }
+          }
+        }
+      }
+
       try { await reader.cancel(); } catch {}
       cancelAnimationFrame(animFrameRef.current);
       setDisplayedSummary(summaryRef.current);
       displayIndexRef.current = summaryRef.current.length;
+      if (!summaryRef.current.trim() && !streamErrored) {
+        setError('No summary was returned for this video. Please try another video.');
+      }
       setStreaming(false);
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') {

@@ -244,8 +244,8 @@ export default function ChatPage({ id, summaryId, onBack }: ChatPageProps) {
   return (
     <div className="app-container">
       <header className="app-header">
-        <h1>Video Summarizer</h1>
-        <p>{id ? 'Chat Conversation' : 'Chat about this Summary'}</p>
+        <h1>VidGist</h1>
+        <p>{id ? 'Chat conversation' : 'Chat about this video'}</p>
       </header>
       <main className="main-content">
         {loading && <p className="summary-text">Loading...</p>}

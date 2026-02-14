@@ -82,24 +82,49 @@ const handleSend = async () => {
 
       // Stream response from Puter
       const stream = puterClient.chatStream(puterMessages, { stream: true });
-      
-      for await (const event of stream) {
-        if (abortController.signal.aborted) break;
-        
-        if (event.thinking) {
-          thinkingRef.current += event.thinking;
-          setThinkingText(thinkingRef.current);
-          setIsThinking(true);
+      const iterator = stream[Symbol.asyncIterator]();
+      const AI_STALL_MS = 45_000;
+      const AI_OVERALL_MS = 120_000;
+      const aiStart = Date.now();
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+
+      try {
+        while (!abortController.signal.aborted) {
+          if (Date.now() - aiStart > AI_OVERALL_MS) {
+            throw new Error('AI response timed out after 2 minutes. Please try again.');
+          }
+
+          const { done, value: event } = await Promise.race([
+            iterator.next(),
+            new Promise<never>((_, reject) => {
+              stallTimer = setTimeout(
+                () => reject(new Error('AI response stalled — no data received for 45 seconds. Please try again.')),
+                AI_STALL_MS
+              );
+            }),
+          ]);
+          clearTimeout(stallTimer);
+
+          if (done) break;
+
+          if (event.thinking) {
+            thinkingRef.current += event.thinking;
+            setThinkingText(thinkingRef.current);
+            setIsThinking(true);
+          }
+
+          if (event.text) {
+            assistantRef.current += event.text;
+            updateMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
+              return newMessages;
+            });
+          }
         }
-        
-        if (event.text) {
-          assistantRef.current += event.text;
-          updateMessages(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
-            return newMessages;
-          });
-        }
+      } finally {
+        clearTimeout(stallTimer);
+        iterator.return?.(undefined);
       }
 
       if (abortController.signal.aborted) {
@@ -140,152 +165,6 @@ const handleSend = async () => {
       });
       setStreaming(false);
     }
-  };
-
-    updateMessages(prev => [...prev, userMessage]);
-    setInput('');
-    setStreaming(true);
-    assistantRef.current = '';
-    thinkingRef.current = '';
-    setThinkingText('');
-    setIsThinking(false);
-
-    updateMessages(prev => [...prev, { role: 'assistant', content: '' }]);
-
-    try {
-      const abortController = new AbortController();
-      abortRef.current = abortController;
-
-      const fp = localStorage.getItem('device_fingerprint') || '';
-      const body: Record<string, unknown> = { message: text };
-      if (chatId) {
-        body.chatId = chatId;
-      } else {
-        body.summary = summary;
-        body.videoUrl = videoUrl;
-        body.history = messages;
-      }
-
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Fingerprint': fp },
-        body: JSON.stringify(body),
-        signal: abortController.signal,
-      });
-
-      if (!res.ok) {
-        try {
-          const data = await res.json();
-          if (data.retryAfter) setRetryAfter(data.retryAfter);
-          assistantRef.current = data.error;
-        } catch {
-          assistantRef.current = `Request failed (${res.status})`;
-        }
-        updateMessages(prev => {
-          const newMessages = [...prev];
-          newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
-          return newMessages;
-        });
-        setStreaming(false);
-        return;
-      }
-
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) {
-        setStreaming(false);
-        return;
-      }
-
-      let buffer = '';
-      let stopped = false;
-
-      while (!stopped) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        buffer = buffer.replace(/\r\n/g, '\n');
-
-        const events = buffer.split('\n\n');
-        buffer = events.pop() || '';
-
-        for (const evt of events) {
-          const dataLines = evt
-            .split('\n')
-            .filter((l) => l.startsWith('data:'))
-            .map((l) => l.slice(5).replace(/^ /, ''));
-
-          if (!dataLines.length) continue;
-
-          const data = dataLines.join('\n');
-          if (data === '[DONE]') {
-            stopped = true;
-            break;
-          }
-
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
-              if (parsed.retryAfter) setRetryAfter(parsed.retryAfter);
-              assistantRef.current = parsed.error;
-              updateMessages(prev => {
-                const newMessages = [...prev];
-                newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
-                return newMessages;
-              });
-              stopped = true;
-              break;
-            }
-            if (parsed.credits !== undefined) {
-              window.dispatchEvent(new CustomEvent('credits-update', { detail: parsed.credits }));
-            }
-            if (parsed.chatId) {
-              setChatId(parsed.chatId);
-            }
-            if (parsed.thinking) {
-              thinkingRef.current += parsed.thinking;
-              setThinkingText(thinkingRef.current);
-              setIsThinking(true);
-            }
-            if (parsed.text) {
-              if (thinkingRef.current) {
-                setIsThinking(false);
-              }
-              assistantRef.current += parsed.text;
-              updateMessages(prev => {
-                const newMessages = [...prev];
-                newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
-                return newMessages;
-              });
-            }
-          } catch (e) {
-            addError(e);
-          }
-        }
-      }
-
-      try {
-        await reader.cancel();
-      } catch (e) {
-        addError(e);
-      }
-    } catch (err) {
-      if ((err as Error)?.name === 'AbortError') {
-        setStreaming(false);
-        return;
-      }
-      addError(err);
-      assistantRef.current = `Error: ${err instanceof Error ? err.message : String(err)}`;
-
-      updateMessages(prev => {
-        const newMessages = [...prev];
-        newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
-        return newMessages;
-      });
-    }
-    setThinkingText('');
-    setStreaming(false);
   };
 
   return (

@@ -1,5 +1,5 @@
 /**
- * Puter.js v2 client wrapper with mock mode support
+ * Puter.js v2 client wrapper using CDN-loaded global SDK
  */
 
 export interface ChatMessage {
@@ -17,42 +17,72 @@ export interface PuterClientOptions {
   stream?: boolean;
 }
 
+function getPuter(): Record<string, any> | null {
+  return (window as any).puter ?? null;
+}
+
+function waitForPuter(timeout = 10000): Promise<Record<string, any>> {
+  return new Promise((resolve, reject) => {
+    const existing = getPuter();
+    if (existing) {
+      resolve(existing);
+      return;
+    }
+    const start = Date.now();
+    const poll = () => {
+      const p = getPuter();
+      if (p) {
+        resolve(p);
+      } else if (Date.now() - start > timeout) {
+        reject(new Error('Puter.js SDK failed to load'));
+      } else {
+        setTimeout(poll, 100);
+      }
+    };
+    poll();
+  });
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
 class PuterClient {
-  private puter: any = null;
   private isMockMode: boolean;
   private signedIn: boolean = false;
+  private sdkReady: Promise<Record<string, any> | null>;
   private availableModels: string[] = [];
   private preferredModels = [
     'claude-sonnet-4',
     'gpt-4o',
-    'claude-sonnet-4-5'
+    'claude-3-5-sonnet-20241022'
   ];
 
   constructor() {
     this.isMockMode = import.meta.env.VITE_PUTER_MOCK === '1';
-    
+
     if (!this.isMockMode && typeof window !== 'undefined') {
-      // Load Puter SDK dynamically
-      import('@heyputer/puter.js').then((puterModule) => {
-        this.puter = puterModule;
-        this.checkAuthStatus();
+      this.sdkReady = waitForPuter().then(async (puter) => {
+        try {
+          const signed = await puter.auth.isSignedIn();
+          this.signedIn = !!signed;
+        } catch {
+          this.signedIn = false;
+        }
+        return puter;
       }).catch((err) => {
-        console.error('Failed to load Puter.js SDK:', err);
+        console.error('Puter SDK init error:', err);
+        return null;
       });
     } else {
-      // Mock mode: always signed in
       this.signedIn = true;
-    }
-  }
-
-  private async checkAuthStatus(): Promise<void> {
-    if (!this.puter) return;
-    
-    try {
-      this.signedIn = await this.puter.auth.isSignedIn();
-    } catch (err) {
-      console.error('Failed to check auth status:', err);
-      this.signedIn = false;
+      this.sdkReady = Promise.resolve(null);
     }
   }
 
@@ -62,31 +92,30 @@ class PuterClient {
       return;
     }
 
-    if (!this.puter) {
-      throw new Error('Puter.js SDK not loaded');
-    }
+    const puter = getPuter() ?? await this.sdkReady;
+    if (!puter) throw new Error('Puter.js SDK not loaded');
 
-    try {
-      await this.puter.auth.signIn();
-      this.signedIn = true;
-      
-      // Cache available models after sign-in
-      await this.cacheAvailableModels();
-    } catch (err) {
-      console.error('Sign in failed:', err);
-      throw err;
-    }
+    await puter.auth.signIn();
+    this.signedIn = true;
+    await this.cacheAvailableModels();
   }
 
   isSignedIn(): boolean {
     return this.signedIn;
   }
 
+  async whenReady(): Promise<boolean> {
+    await this.sdkReady;
+    return this.signedIn;
+  }
+
   private async cacheAvailableModels(): Promise<void> {
-    if (!this.puter || this.isMockMode) return;
+    if (this.isMockMode) return;
+    const puter = getPuter();
+    if (!puter) return;
 
     try {
-      const models = await this.puter.ai.listModels();
+      const models = await puter.ai.listModels();
       this.availableModels = Array.isArray(models) ? models : [];
     } catch (err) {
       console.warn('Failed to fetch available models:', err);
@@ -96,81 +125,90 @@ class PuterClient {
 
   private getBestModel(): string {
     if (this.isMockMode) {
-      return 'claude-opus-4-5-thinking';
+      return 'claude-sonnet-4';
     }
 
-    // Check cached models first
     for (const model of this.preferredModels) {
       if (this.availableModels.includes(model)) {
         return model;
       }
     }
 
-    // Fallback to first preferred model
     return this.preferredModels[0];
   }
 
   async *chatStream(messages: ChatMessage[], options: PuterClientOptions = {}): AsyncGenerator<StreamingEvent> {
     const { stream = true, model } = options;
-    const selectedModel = model || this.getBestModel();
 
     if (this.isMockMode) {
-      // Mock streaming for testing
       yield* this.mockChatStream(messages);
       return;
     }
 
-    if (!this.puter || !this.signedIn) {
+    const puter = await this.sdkReady;
+    if (!puter || !this.signedIn) {
       throw new Error('Not signed in to Puter');
     }
 
-    try {
-      const response = await this.puter.ai.chat(messages, {
-        model: selectedModel,
-        stream,
-      });
+    const modelsToTry = model ? [model] : [...this.preferredModels];
+    let lastError: Error | null = null;
 
-      if (stream && response[Symbol.asyncIterator]) {
-        for await (const chunk of response) {
-          if (chunk?.reasoning) {
-            yield { thinking: chunk.reasoning };
+    for (const selectedModel of modelsToTry) {
+      try {
+        console.log(`[Puter AI] Trying model: ${selectedModel}`);
+
+        const response = await withTimeout(
+          puter.ai.chat(messages, { model: selectedModel, stream }),
+          60_000,
+          `Puter AI request timed out after 60s (model: ${selectedModel})`
+        );
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const respAny = response as any;
+        console.log(`[Puter AI] Response received — type: ${typeof response}, asyncIterable: ${!!respAny?.[Symbol.asyncIterator]}`);
+
+        if (stream && respAny && typeof respAny === 'object' && Symbol.asyncIterator in respAny) {
+          for await (const chunk of respAny as AsyncIterable<{ reasoning?: string; text?: string }>) {
+            if (chunk?.reasoning) {
+              yield { thinking: chunk.reasoning };
+            }
+            if (chunk?.text) {
+              yield { text: chunk.text };
+            }
           }
-          if (chunk?.text) {
-            yield { text: chunk.text };
-          }
-        }
-      } else if (typeof response === 'string') {
-        yield { text: response };
-      } else if (response?.message?.content) {
-        yield { text: response.message.content };
-      } else if (response?.text) {
-        yield { text: response.text };
-      }
-    } catch (err: any) {
-      if (err.message?.includes('model not found') || err.message?.includes('invalid model')) {
-        // Try next model
-        const nextModelIndex = this.preferredModels.indexOf(selectedModel) + 1;
-        if (nextModelIndex < this.preferredModels.length) {
-          console.log(`Model ${selectedModel} not found, trying ${this.preferredModels[nextModelIndex]}`);
-          yield* this.chatStream(messages, { ...options, model: this.preferredModels[nextModelIndex] });
           return;
+        } else if (typeof response === 'string') {
+          yield { text: response };
+          return;
+        } else if (respAny && typeof respAny === 'object') {
+          const resp = respAny as { message?: { content?: string }; text?: string };
+          if (resp.message?.content) {
+            yield { text: resp.message.content };
+            return;
+          } else if (resp.text) {
+            yield { text: resp.text };
+            return;
+          }
         }
+        throw new Error(`Unrecognized response format from Puter AI (model: ${selectedModel})`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[Puter AI] Model ${selectedModel} failed: ${message}`);
+        lastError = err instanceof Error ? err : new Error(message);
       }
-      throw err;
     }
+
+    throw lastError || new Error('All Puter AI models failed');
   }
 
   private async *mockChatStream(messages: ChatMessage[]): AsyncGenerator<StreamingEvent> {
-    // Simulate thinking for first message
     if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
       yield { thinking: 'Analyzing request and formulating response...' };
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // Generate deterministic mock response
     const mockResponse = `## Mock Response\n\nThis is a deterministic mock response for testing.\n\n**User Query:** "${messages[messages.length - 1]?.content || 'No query'}"\n\n**Response:** This demonstrates Puter.js v2 streaming in mock mode. No actual API calls were made.`;
 
-    // Stream response in chunks
     const chunkSize = 20;
     for (let i = 0; i < mockResponse.length; i += chunkSize) {
       yield { text: mockResponse.slice(i, i + chunkSize) };
@@ -182,10 +220,9 @@ class PuterClient {
     const messages: ChatMessage[] = [
       { role: 'user', content: prompt }
     ];
-    
+
     yield* this.chatStream(messages, options);
   }
 }
 
-// Singleton instance
 export const puterClient = new PuterClient();

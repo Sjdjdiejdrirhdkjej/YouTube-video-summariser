@@ -161,6 +161,101 @@
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+/* Auth area */
+.manus-nav-auth {
+  display: flex;
+  align-items: center;
+}
+
+.manus-auth-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 18px;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  font-weight: 600;
+  color: #c4b5fd;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(129, 140, 248, 0.25);
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.manus-auth-button::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 9999px;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.4), rgba(168, 85, 247, 0.4));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.manus-auth-button:hover:not(:disabled) {
+  color: #e0e7ff;
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(129, 140, 248, 0.5);
+  box-shadow: 0 0 24px rgba(99, 102, 241, 0.2), 0 0 8px rgba(139, 92, 246, 0.15);
+  transform: translateY(-1px);
+}
+
+.manus-auth-button:hover:not(:disabled)::before {
+  opacity: 1;
+}
+
+.manus-auth-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.manus-auth-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.manus-auth-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #71717a;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 9999px;
+}
+
+.manus-auth-status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+  animation: manus-auth-pulse 2s ease-in-out infinite;
+}
+
+@keyframes manus-auth-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(74, 222, 128, 0.4); }
+  50% { opacity: 0.6; box-shadow: 0 0 12px rgba(74, 222, 128, 0.7); }
+}
+
+.manus-auth-status--mock::before {
+  background: #facc15;
+  box-shadow: 0 0 8px rgba(250, 204, 21, 0.5);
+  animation: none;
+}
+
 /* Main content area */
 .manus-content {
   position: relative;
@@ -909,6 +1004,16 @@
 
   .manus-content {
     padding: 0 16px;
+  }
+
+  .manus-auth-button {
+    padding: 6px 12px;
+    font-size: 0.75rem;
+  }
+
+  .manus-auth-status {
+    padding: 5px 10px;
+    font-size: 0.7rem;
   }
 }
 

@@ -84,8 +84,8 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
   const [puterSignedIn, setPuterSignedIn] = React.useState(false);
 
   React.useEffect(() => {
-    // Check Puter auth status
     setPuterSignedIn(puterClient.isSignedIn());
+    puterClient.whenReady().then((signedIn) => setPuterSignedIn(signedIn));
   }, []);
 
   React.useEffect(() => {
@@ -258,27 +258,52 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
       
       let fullSummary = '';
       const stream = puterClient.summarizeStream(prompt, { stream: true });
-      
-      for await (const event of stream) {
-        if (abortController.signal.aborted) break;
-        
-        if (event.thinking) {
-          thinkingRef.current += event.thinking;
-          setThinkingText(thinkingRef.current);
-          setIsThinking(true);
+      const iterator = stream[Symbol.asyncIterator]();
+      const AI_STALL_MS = 45_000;
+      const AI_OVERALL_MS = 120_000;
+      const aiStart = Date.now();
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+
+      try {
+        while (!abortController.signal.aborted) {
+          if (Date.now() - aiStart > AI_OVERALL_MS) {
+            throw new Error('AI summary generation timed out after 2 minutes. Please try again.');
+          }
+
+          const { done, value: event } = await Promise.race([
+            iterator.next(),
+            new Promise<never>((_, reject) => {
+              stallTimer = setTimeout(
+                () => reject(new Error('AI response stalled — no data received for 45 seconds. Please try again.')),
+                AI_STALL_MS
+              );
+            }),
+          ]);
+          clearTimeout(stallTimer);
+
+          if (done) break;
+
+          if (event.thinking) {
+            thinkingRef.current += event.thinking;
+            setThinkingText(thinkingRef.current);
+            setIsThinking(true);
+          }
+
+          if (event.text) {
+            fullSummary += event.text;
+            setDisplayedSummary(fullSummary);
+            setProgressSteps(prev => {
+              const hasProcessing = prev.some(p => p.step === 'processing');
+              if (hasProcessing) {
+                return prev.map(p => p.step === 'processing' ? { ...p, done: true } : p);
+              }
+              return prev;
+            });
+          }
         }
-        
-        if (event.text) {
-          fullSummary += event.text;
-          setDisplayedSummary(fullSummary);
-          setProgressSteps(prev => {
-            const hasProcessing = prev.some(p => p.step === 'processing');
-            if (hasProcessing) {
-              return prev.map(p => p.step === 'processing' ? { ...p, done: true } : p);
-            }
-            return prev;
-          });
-        }
+      } finally {
+        clearTimeout(stallTimer);
+        iterator.return?.(undefined);
       }
 
       if (abortController.signal.aborted) {
@@ -387,7 +412,7 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
           {puterSignedIn ? (
             <span className="manus-auth-status">Signed in</span>
           ) : import.meta.env.VITE_PUTER_MOCK === '1' ? (
-            <span className="manus-auth-status">Mock Mode</span>
+            <span className="manus-auth-status manus-auth-status--mock">Mock Mode</span>
           ) : (
             <button
               type="button"

@@ -62,18 +62,27 @@ export class PuterJSProvider implements LLMProvider {
       throw new Error('Puter.js provider not available');
     }
 
-    const response = await this.puter.ai.chat(messages, {
-      model: 'claude-sonnet-4',
-      stream: true,
-    });
+    const response = await this.puter.ai.chat(
+      messages.map(msg => ({ role: msg.role, content: msg.content })),
+      {
+        model: 'claude-sonnet-4',
+        stream: true,
+      }
+    );
 
-    for await (const chunk of response) {
-      if (chunk?.reasoning) {
-        yield { thinking: chunk.reasoning };
+    if (response[Symbol.asyncIterator]) {
+      for await (const chunk of response) {
+        if (chunk?.reasoning) {
+          yield { thinking: chunk.reasoning };
+        }
+        if (chunk?.text) {
+          yield { text: chunk.text };
+        }
       }
-      if (chunk?.text) {
-        yield { text: chunk.text };
-      }
+    } else if (typeof response === 'string') {
+      yield { text: response };
+    } else if (response?.message?.content) {
+      yield { text: response.message.content };
     }
   }
 }

@@ -26,30 +26,11 @@ const envFilePaths = process.env.ENV_FILE
   ? [path.resolve(process.env.ENV_FILE)]
   : [path.resolve(cwd, '.env'), path.resolve(projectRoot, '.env')];
 
-if (!process.env.GEMINI_API_KEY?.trim()) {
-  for (const envPath of envFilePaths) {
-    if (!fs.existsSync(envPath)) continue;
-    try {
-      const content = fs.readFileSync(envPath, 'utf8');
-      const match = content.match(/^\s*GEMINI_API_KEY\s*=\s*(.+?)\s*$/m);
-      if (match) {
-        const value = match[1].replace(/^["']|["']$/g, '').trim();
-        if (value) {
-          process.env.GEMINI_API_KEY = value;
-          break;
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-}
+
 
 import express from 'express';
 import cors from 'cors';
-import { GoogleGenAI } from '@google/genai';
 import { CohereClientV2 } from 'cohere-ai';
-import { OpenAI } from 'openai';
 import { gatherSignals, buildFusionPrompt, extractVideoId, type VideoSignals } from './youtube.js';
 
 const app = express();
@@ -111,7 +92,6 @@ function getFingerprint(req: express.Request): string | null {
   return null;
 }
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim() || undefined;
 const COHERE_API_KEY = process.env.COHERE_API_KEY?.trim() || undefined;
 
 function isRateLimitError(err: unknown): { limited: boolean; retryAfter: number } {
@@ -255,110 +235,7 @@ app.get('/api/credits', (req, res) => {
   res.json({ credits: getCredits(fp), costPerCredit: 0.01 });
 });
 
-app.post('/api/summarize', async (req, res) => {
-  let fp: string | null = null;
-  let videoUrl = '';
-  let summaryId: string | undefined;
 
-  try {
-    fp = getFingerprint(req);
-    if (!fp) {
-      res.status(400).json({ error: 'Missing fingerprint header.' });
-      return;
-    }
-    if (!deductCredits(fp, 5)) {
-      res.status(403).json({ error: 'No credits remaining. Each device gets 500 free credits.', credits: getCredits(fp) });
-      return;
-    }
-    videoUrl = req.body.videoUrl;
-    if (!videoUrl || typeof videoUrl !== 'string') {
-      res.status(400).json({ error: 'videoUrl is required' });
-      return;
-    }
-
-    if (!isValidYoutubeUrl(videoUrl)) {
-      res.status(400).json({ error: 'Invalid YouTube video URL' });
-      return;
-    }
-
-    if (!GEMINI_API_KEY) {
-      refundCredits(fp, 5);
-      res.status(500).json({
-        error: 'Summarization is not configured. Set GEMINI_API_KEY.',
-      });
-      return;
-    }
-
-    summaryId = generateSummaryId();
-    let fullText = '';
-
-    const abortController = new AbortController();
-    req.on('close', () => abortController.abort());
-
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-
-    const stream = await ai.models.generateContentStream({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { fileData: { fileUri: videoUrl } },
-            {
-              text: 'Summarize this video in clear, concise points. Include key takeaways. Keep the summary readable and well-structured (use markdown line breaks and bullets where helpful).',
-            },
-          ],
-        },
-      ],
-    });
-
-    for await (const chunk of stream) {
-      if (abortController.signal.aborted) break;
-      const text = chunk.text;
-      if (text) {
-        fullText += text;
-      }
-    }
-
-    if (abortController.signal.aborted) {
-      return;
-    }
-
-    if (!fullText.trim()) {
-      try {
-        const signals = await gatherSignals(videoUrl);
-        fullText = buildSignalFallbackSummary(signals);
-      } catch (fallbackErr) {
-        console.error('Signal fallback also failed:', fallbackErr);
-      }
-    }
-
-    if (!fullText.trim()) {
-      throw new Error('Summary generation produced no content.');
-    }
-
-    savedSummaries.set(summaryId, {
-      id: summaryId,
-      fingerprint: fp,
-      videoUrl,
-      summary: fullText,
-      createdAt: Date.now(),
-    });
-
-    res.json({ summary: fullText, summaryId, credits: getCredits(fp) });
-  } catch (err) {
-    if ((err as any)?.name === 'AbortError') {
-      return;
-    }
-    if (handleRateLimit(res, err)) return;
-    console.error('Summarize error:', err);
-    if (fp) refundCredits(fp, 5);
-    const message = err instanceof Error ? err.message : String(err);
-    if (!res.headersSent) {
-      res.status(500).json({ error: message, credits: fp ? getCredits(fp) : undefined });
-    }
-  }
-});
 
 function writeProgress(res: any, step: string, message: string): boolean {
   if (res.writableEnded) return false;
@@ -489,10 +366,10 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       return;
     }
 
-    if (!GEMINI_API_KEY && !COHERE_API_KEY) {
+    if (!COHERE_API_KEY) {
       refundCredits(fp, 5);
       res.status(500).json({
-        error: 'Summarization is not configured. Set GEMINI_API_KEY and/or COHERE_API_KEY.',
+        error: 'Summarization is not configured. Set COHERE_API_KEY.',
       });
       return;
     }
@@ -641,63 +518,22 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       };
 
       try {
-        if (COHERE_API_KEY) {
-          try {
-            const cohere = new CohereClientV2({ token: COHERE_API_KEY });
-            writeProgress(res, 'reasoning', 'AI is analyzing and reasoning...');
-            const stream = await cohere.chatStream({
-              model: 'command-a-reasoning-08-2025',
-              messages: [{ role: 'user', content: prompt }],
-              thinking: { type: 'enabled', tokenBudget: 4096 },
-            });
-            for await (const event of stream) {
-              if (abortController.signal.aborted) break;
-              if (event.type === 'content-delta') {
-                const { thinking, text } = extractCohereDelta(event);
-                
-                  if (thinking) {
-                  streamThinking(thinking);
-                }
-                
-                if (text) {
-                  fullText += text;
-                  if (!stepSent.drafting) {
-                    updateStep('drafting');
-                  }
-                }
-              }
+        const cohere = new CohereClientV2({ token: COHERE_API_KEY });
+        writeProgress(res, 'reasoning', 'AI is analyzing and reasoning...');
+        const stream = await cohere.chatStream({
+          model: 'command-a-reasoning-08-2025',
+          messages: [{ role: 'user', content: prompt }],
+          thinking: { type: 'enabled', tokenBudget: 4096 },
+        });
+        for await (const event of stream) {
+          if (abortController.signal.aborted) break;
+          if (event.type === 'content-delta') {
+            const { thinking, text } = extractCohereDelta(event);
+
+            if (thinking) {
+              streamThinking(thinking);
             }
-          } catch (cohereErr) {
-            console.error('Cohere failed, trying Gemini fallback:', cohereErr);
-            if (GEMINI_API_KEY && !abortController.signal.aborted) {
-              const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-              const geminiStream = await ai.models.generateContentStream({
-                model: 'gemini-2.5-flash',
-                contents: [{ role: 'user', parts: [{ text: prompt }] }],
-              });
-              writeProgress(res, 'processing', 'Generating summary with Gemini...');
-              for await (const chunk of geminiStream) {
-                if (abortController.signal.aborted) break;
-                const text = chunk.text;
-                if (text) {
-                  fullText += text;
-                  if (!stepSent.drafting) {
-                    updateStep('drafting');
-                  }
-                }
-              }
-            }
-          }
-        } else if (GEMINI_API_KEY) {
-          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-          writeProgress(res, 'processing', 'Generating summary with Gemini...');
-          const geminiStream = await ai.models.generateContentStream({
-            model: 'gemini-2.5-flash',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          });
-          for await (const chunk of geminiStream) {
-            if (abortController.signal.aborted) break;
-            const text = chunk.text;
+
             if (text) {
               fullText += text;
               if (!stepSent.drafting) {
@@ -707,7 +543,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
           }
         }
       } catch (llmErr) {
-        console.error('LLM summarization failed, will use fallbacks:', llmErr);
+        console.error('Cohere summarization failed, will use fallbacks:', llmErr);
       }
 
       // Store streamed thinking for final response
@@ -1001,7 +837,7 @@ app.get('/api/changelog', async (_req, res) => {
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
-    hasGeminiKey: Boolean(GEMINI_API_KEY),
+    hasCohereKey: Boolean(COHERE_API_KEY),
   });
 });
 
@@ -1017,4 +853,4 @@ if (fs.existsSync(distPath)) {
   });
 }
 
-export { app, GEMINI_API_KEY };
+export { app };

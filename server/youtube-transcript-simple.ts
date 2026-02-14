@@ -3,6 +3,8 @@ const INVIDIOUS_INSTANCES = [
   'https://invidious.fdn.fr',
   'https://invidious.nerdvpn.de',
   'https://inv.nadeko.net',
+  'https://vid.puffyan.us',
+  'https://invidious.privacyredirect.com',
 ];
 
 function getInvidiousUrls(): string[] {

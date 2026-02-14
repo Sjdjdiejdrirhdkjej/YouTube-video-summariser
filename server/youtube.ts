@@ -40,7 +40,7 @@ export interface VideoSignals {
   missing: Record<string, string>;
 }
 
-const FETCH_TIMEOUT = 10_000;
+const FETCH_TIMEOUT = 15_000;
 
 function timedFetch(url: string, opts?: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -214,6 +214,8 @@ const INVIDIOUS_INSTANCES = [
   'https://invidious.fdn.fr',
   'https://invidious.nerdvpn.de',
   'https://inv.nadeko.net',
+  'https://vid.puffyan.us',
+  'https://invidious.privacyredirect.com',
 ];
 
 function getInvidiousUrls(): string[] {
@@ -256,11 +258,62 @@ async function fetchTranscriptInvidious(videoId: string): Promise<TranscriptData
   };
 }
 
+async function fetchTranscriptFromWatchPage(videoId: string): Promise<TranscriptData> {
+  const html = await fetchWatchPageHtml(videoId);
+
+  const playerMatch = html.match(/var\s+ytInitialPlayerResponse\s*=\s*(\{.+?\});\s*(?:var|<\/script>)/s);
+  if (!playerMatch) throw new Error('No player response found');
+
+  const playerData = JSON.parse(playerMatch[1]);
+  const captionTracks =
+    playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+  if (!captionTracks || captionTracks.length === 0) {
+    throw new Error('No caption tracks available');
+  }
+
+  const enTrack = captionTracks.find(
+    (t: any) => t.languageCode?.startsWith('en')
+  ) || captionTracks[0];
+
+  let captionUrl = enTrack.baseUrl;
+  if (!captionUrl.includes('fmt=')) {
+    captionUrl += (captionUrl.includes('?') ? '&' : '?') + 'fmt=srv3';
+  }
+
+  const res = await timedFetch(captionUrl);
+  if (!res.ok) throw new Error(`Caption fetch returned ${res.status}`);
+  const xml = await res.text();
+
+  const segments: string[] = [];
+  const textRegex = /<text[^>]*>([^<]*)<\/text>/g;
+  let m: RegExpExecArray | null;
+  while ((m = textRegex.exec(xml)) !== null) {
+    const decoded = m[1]
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\n/g, ' ')
+      .trim();
+    if (decoded) segments.push(decoded);
+  }
+
+  const text = segments.join(' ');
+  if (!text) throw new Error('Empty caption text');
+
+  return {
+    available: true,
+    text,
+    language: enTrack.languageCode || 'unknown',
+    segmentCount: segments.length,
+  };
+}
+
 export async function fetchTranscript(videoUrl: string): Promise<TranscriptData> {
   const videoId = extractVideoId(videoUrl);
   if (!videoId) throw new Error('Invalid YouTube URL');
 
-  // Race both providers in parallel - use whichever succeeds first
   const raceWithTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Timeout')), ms);
@@ -273,8 +326,9 @@ export async function fetchTranscript(videoUrl: string): Promise<TranscriptData>
       Promise.any([
         fetchTranscriptPlayzone(videoId),
         fetchTranscriptInvidious(videoId),
+        fetchTranscriptFromWatchPage(videoId),
       ]),
-      15_000 // 15 second timeout for transcript fetch
+      30_000
     );
   } catch (e) {
     throw new Error(
@@ -366,15 +420,6 @@ export async function gatherSignals(videoUrl: string): Promise<VideoSignals> {
   }
 
   if (comments.length === 0 && !missing.comments) missing.comments = 'no comments found';
-
-  if (!oembed && !metadata && !transcript) {
-    throw new Error(
-      'Could not retrieve any information about this video. ' +
-        Object.entries(missing)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join('; ')
-    );
-  }
 
   return { videoId, videoUrl, oembed, metadata, transcript, comments, missing };
 }

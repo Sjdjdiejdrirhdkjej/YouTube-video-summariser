@@ -275,7 +275,10 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
 
               if (parsed.error) {
                 if (parsed.retryAfter) setRetryAfter(parsed.retryAfter as number);
-                throw new Error(parsed.error as string);
+                setError(parsed.error as string);
+                setLoading(false);
+                stopped = true;
+                break;
               }
             } catch (e) {
               console.error('SSE parse error:', e, 'Raw data:', data);

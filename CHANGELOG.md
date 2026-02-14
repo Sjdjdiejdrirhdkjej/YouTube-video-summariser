@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fixed "Could not generate a summary" error** — SSE error events from the server are now properly displayed to the user instead of being swallowed, which caused a generic unhelpful error message.
+- **Added direct YouTube captions provider** — a third transcript provider that extracts captions directly from the YouTube watch page, making transcript fetching much more reliable when Invidious instances are down.
+- **Increased timeouts** — raised signal-gathering timeout from 20s to 45s and transcript race timeout from 15s to 30s to prevent premature failures on slower connections.
+- **More resilient signal gathering** — `gatherSignals` no longer throws when all signals fail; it returns partial results so the fallback summary can still be generated.
+- **Added more Invidious instances** for better transcript fetch reliability.
+
 ### Changed
 
 - **Updated Cohere model to Command A Reasoning** — switched from `command-a-03-2025` to `command-a-reasoning-08-2025` for improved reasoning capabilities in summarization and chat.

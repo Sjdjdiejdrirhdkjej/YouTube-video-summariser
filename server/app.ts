@@ -540,7 +540,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
       
       try {
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Request timed out after 20 seconds')), 20000)
+          setTimeout(() => reject(new Error('Request timed out after 45 seconds')), 45000)
         );
         signals = await Promise.race([gatherSignals(videoUrl), timeoutPromise]);
       } catch (e) {

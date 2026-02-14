@@ -230,7 +230,7 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
                   };
                   const mappedStep = stepMap[step] || step;
                   
-                  const granularSteps = ['analyzing', 'reasoning', 'drafting', 'refining', 'processing'];
+                  const granularSteps = ['start', 'analyzing', 'reasoning', 'drafting', 'refining', 'processing'];
                   if (granularSteps.includes(mappedStep)) {
                     setProgressSteps(prev => {
                       const hasGranular = prev.some(p => granularSteps.includes(p.step));
@@ -278,7 +278,34 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
                 throw new Error(parsed.error as string);
               }
             } catch (e) {
+              console.error('SSE parse error:', e, 'Raw data:', data);
               addError(e);
+            }
+          }
+        }
+
+        // Process any remaining buffer data (handles case where [DONE] comes without trailing \n\n)
+        const trimmed = buffer.trim();
+        if (trimmed && trimmed.startsWith('data:')) {
+          const data = trimmed.replace(/^data:\s*/, '');
+          if (data && data !== '[DONE]') {
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.summary) {
+                fullSummary = parsed.summary;
+                returnedSummaryId = parsed.summaryId;
+                returnedThinking = parsed.thinking || '';
+                if (typeof parsed.credits === 'number') {
+                  credits = parsed.credits;
+                  setCredits(parsed.credits);
+                }
+                if (Array.isArray(parsed.sources)) {
+                  setSources(parsed.sources);
+                }
+                setProgressPercent(100);
+              }
+            } catch (e) {
+              console.error('Final buffer parse error:', e);
             }
           }
         }

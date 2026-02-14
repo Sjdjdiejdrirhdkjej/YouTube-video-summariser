@@ -41,10 +41,11 @@ export interface VideoSignals {
 }
 
 const FETCH_TIMEOUT = 8_000;
+const WATCH_PAGE_TIMEOUT = 12_000;
 
-function timedFetch(url: string, opts?: RequestInit): Promise<Response> {
+function timedFetch(url: string, opts?: RequestInit, timeout = FETCH_TIMEOUT): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+  const timer = setTimeout(() => controller.abort(), timeout);
   return fetch(url, { ...opts, signal: controller.signal })
     .catch((err) => {
       const msg = err instanceof Error ? err.message : String(err);
@@ -81,7 +82,7 @@ export async function fetchWatchPageHtml(videoId: string): Promise<string> {
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept-Language': 'en-US,en;q=0.9',
     },
-  });
+  }, WATCH_PAGE_TIMEOUT);
   if (!res.ok) throw new Error(`Watch page returned ${res.status}`);
   return res.text();
 }
@@ -258,8 +259,8 @@ async function fetchTranscriptInvidious(videoId: string): Promise<TranscriptData
   };
 }
 
-async function fetchTranscriptFromWatchPage(videoId: string): Promise<TranscriptData> {
-  const html = await fetchWatchPageHtml(videoId);
+async function fetchTranscriptFromWatchPage(videoId: string, existingHtml?: string): Promise<TranscriptData> {
+  const html = existingHtml || await fetchWatchPageHtml(videoId);
 
   const playerMatch = html.match(/var\s+ytInitialPlayerResponse\s*=\s*(\{.+?\});\s*(?:var|<\/script>)/s);
   if (!playerMatch) throw new Error('No player response found');
@@ -310,7 +311,10 @@ async function fetchTranscriptFromWatchPage(videoId: string): Promise<Transcript
   };
 }
 
-export async function fetchTranscript(videoUrl: string): Promise<TranscriptData> {
+export async function fetchTranscript(
+  videoUrl: string,
+  existingWatchHtml?: string
+): Promise<TranscriptData> {
   const videoId = extractVideoId(videoUrl);
   if (!videoId) throw new Error('Invalid YouTube URL');
 
@@ -321,13 +325,25 @@ export async function fetchTranscript(videoUrl: string): Promise<TranscriptData>
     });
   };
 
+  // Create transcript fetch promises - reuse HTML if available to avoid duplicate fetch
+  const transcriptPromises: Promise<TranscriptData>[] = [
+    // Try watch page first if we have HTML (fastest, no external API needed)
+    existingWatchHtml
+      ? fetchTranscriptFromWatchPage(videoId, existingWatchHtml).then(t => {
+          if (!t.available || !t.text) throw new Error('No captions');
+          return t;
+        })
+      : Promise.reject(new Error('No HTML available')),
+    // Try playzone (usually fastest external provider)
+    fetchTranscriptPlayzone(videoId),
+    // Try Invidious as fallback
+    fetchTranscriptInvidious(videoId),
+  ];
+
   try {
+    // Race all three methods in parallel - first one to succeed wins
     return await raceWithTimeout(
-      Promise.any([
-        fetchTranscriptPlayzone(videoId),
-        fetchTranscriptInvidious(videoId),
-        fetchTranscriptFromWatchPage(videoId),
-      ]),
+      Promise.any(transcriptPromises),
       20_000
     );
   } catch (e) {
@@ -384,12 +400,26 @@ export async function gatherSignals(videoUrl: string): Promise<VideoSignals> {
 
   const missing: Record<string, string> = {};
 
-  const [oembedResult, watchHtmlResult, transcriptResult] =
-    await Promise.allSettled([
-      fetchOEmbed(videoUrl),
-      fetchWatchPageHtml(videoId),
-      fetchTranscript(videoUrl),
-    ]);
+  // Fetch oEmbed and watch page in parallel
+  const [oembedResult, watchHtmlResult] = await Promise.allSettled([
+    fetchOEmbed(videoUrl),
+    fetchWatchPageHtml(videoId),
+  ]);
+
+  // Extract watch page HTML if available
+  const watchHtml = watchHtmlResult.status === 'fulfilled' ? watchHtmlResult.value : null;
+
+  // Fetch transcript using existing HTML if available (avoids duplicate request)
+  let transcriptResult: PromiseSettledResult<TranscriptData>;
+  if (watchHtml) {
+    transcriptResult = await Promise.allSettled([
+      fetchTranscript(videoUrl, watchHtml)
+    ]).then(([result]) => result);
+  } else {
+    transcriptResult = await Promise.allSettled([
+      fetchTranscript(videoUrl)
+    ]).then(([result]) => result);
+  }
 
   const oembed = oembedResult.status === 'fulfilled' ? oembedResult.value : null;
   if (!oembed) missing.oembed = reasonFrom(oembedResult);

@@ -298,7 +298,7 @@ app.post('/api/summarize', async (req, res) => {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
     const stream = await ai.models.generateContentStream({
-      model: 'gemini-3-pro',
+      model: 'gemini-2.5-flash',
       contents: [
         {
           role: 'user',
@@ -645,9 +645,8 @@ app.post('/api/summarize-hybrid', async (req, res) => {
           try {
             const cohere = new CohereClientV2({ token: COHERE_API_KEY });
             const stream = await cohere.chatStream({
-              model: 'command-a-reasoning-08-2025',
+              model: 'command-a-03-2025',
               messages: [{ role: 'user', content: prompt }],
-              thinking: { type: 'disabled' },
             });
             for await (const event of stream) {
               if (abortController.signal.aborted) break;
@@ -663,7 +662,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
             if (GEMINI_API_KEY && !abortController.signal.aborted) {
               const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
               const geminiStream = await ai.models.generateContentStream({
-                model: 'gemini-3-pro',
+                model: 'gemini-2.5-flash',
                 contents: [{ role: 'user', parts: [{ text: prompt }] }],
               });
               for await (const chunk of geminiStream) {
@@ -678,7 +677,7 @@ app.post('/api/summarize-hybrid', async (req, res) => {
         } else if (GEMINI_API_KEY) {
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const geminiStream = await ai.models.generateContentStream({
-            model: 'gemini-3-pro',
+            model: 'gemini-2.5-flash',
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
           });
           for await (const chunk of geminiStream) {

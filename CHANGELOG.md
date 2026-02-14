@@ -11,6 +11,8 @@ All notable changes to this project will be documented in this file.
 - **Increased timeouts** — raised signal-gathering timeout from 20s to 45s and transcript race timeout from 15s to 30s to prevent premature failures on slower connections.
 - **More resilient signal gathering** — `gatherSignals` no longer throws when all signals fail; it returns partial results so the fallback summary can still be generated.
 - **Added more Invidious instances** for better transcript fetch reliability.
+- **Fixed invalid Gemini model name** — changed `gemini-3-pro` (does not exist) to `gemini-2.5-flash`, which was causing Gemini fallback summarization to always fail.
+- **Fixed Cohere model for summarization** — switched from `command-a-reasoning-08-2025` with thinking disabled to `command-a-03-2025`, the correct non-reasoning model for summarization tasks.
 
 ### Changed
 

@@ -20,6 +20,9 @@
       "dest": "/api/index.ts"
     },
     {
+      "handle": "filesystem"
+    },
+    {
       "src": "/(.*)",
       "dest": "/dist/index.html"
     }

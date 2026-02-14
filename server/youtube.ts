@@ -40,7 +40,7 @@ export interface VideoSignals {
   missing: Record<string, string>;
 }
 
-const FETCH_TIMEOUT = 15_000;
+const FETCH_TIMEOUT = 8_000;
 
 function timedFetch(url: string, opts?: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -328,7 +328,7 @@ export async function fetchTranscript(videoUrl: string): Promise<TranscriptData>
         fetchTranscriptInvidious(videoId),
         fetchTranscriptFromWatchPage(videoId),
       ]),
-      30_000
+      20_000
     );
   } catch (e) {
     throw new Error(

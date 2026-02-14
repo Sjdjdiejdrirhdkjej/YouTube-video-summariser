@@ -644,16 +644,26 @@ app.post('/api/summarize-hybrid', async (req, res) => {
         if (COHERE_API_KEY) {
           try {
             const cohere = new CohereClientV2({ token: COHERE_API_KEY });
+            writeProgress(res, 'reasoning', 'AI is analyzing and reasoning...');
             const stream = await cohere.chatStream({
-              model: 'command-a-03-2025',
+              model: 'command-a-reasoning-08-2025',
               messages: [{ role: 'user', content: prompt }],
+              thinking: { type: 'enabled', tokenBudget: 4096 },
             });
             for await (const event of stream) {
               if (abortController.signal.aborted) break;
               if (event.type === 'content-delta') {
-                const { text } = extractCohereDelta(event);
+                const { thinking, text } = extractCohereDelta(event);
+                
+                  if (thinking) {
+                  streamThinking(thinking);
+                }
+                
                 if (text) {
                   fullText += text;
+                  if (!stepSent.drafting) {
+                    updateStep('drafting');
+                  }
                 }
               }
             }
@@ -665,17 +675,22 @@ app.post('/api/summarize-hybrid', async (req, res) => {
                 model: 'gemini-2.5-flash',
                 contents: [{ role: 'user', parts: [{ text: prompt }] }],
               });
+              writeProgress(res, 'processing', 'Generating summary with Gemini...');
               for await (const chunk of geminiStream) {
                 if (abortController.signal.aborted) break;
                 const text = chunk.text;
                 if (text) {
                   fullText += text;
+                  if (!stepSent.drafting) {
+                    updateStep('drafting');
+                  }
                 }
               }
             }
           }
         } else if (GEMINI_API_KEY) {
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+          writeProgress(res, 'processing', 'Generating summary with Gemini...');
           const geminiStream = await ai.models.generateContentStream({
             model: 'gemini-2.5-flash',
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -685,6 +700,9 @@ app.post('/api/summarize-hybrid', async (req, res) => {
             const text = chunk.text;
             if (text) {
               fullText += text;
+              if (!stepSent.drafting) {
+                updateStep('drafting');
+              }
             }
           }
         }

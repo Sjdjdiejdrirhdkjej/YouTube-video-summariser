@@ -511,15 +511,17 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
         ) : null}
 
         {progressSteps.length > 0 && (
-          <div className="manus-progress">
-            <div className="manus-progress-header">
-              <span className="manus-progress-spinner" />
-              <span>Generating summary...</span>
-              {progressSteps.length > 0 && (
-                <span className="manus-progress-time">
-                  {elapsedSeconds < 5 ? 'just now' : elapsedSeconds < 60 ? `${elapsedSeconds}s elapsed` : `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`}
-                </span>
-              )}
+          <div className="manus-live-progress">
+            <div className="manus-live-progress-header">
+              <span className="manus-live-spinner" />
+              <span className="manus-live-title">
+                {progressSteps.some(p => p.step === 'processing' && !p.done) 
+                  ? 'AI is thinking...' 
+                  : 'Analyzing video...'}
+              </span>
+              <span className="manus-live-time">
+                {elapsedSeconds < 5 ? '' : elapsedSeconds < 60 ? `${elapsedSeconds}s` : `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`}
+              </span>
               <button
                 type="button"
                 className="manus-cancel-btn"
@@ -535,62 +537,31 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
-                Cancel
               </button>
             </div>
-            <div className="manus-progress-bar-wrap">
-              <div 
-                className="manus-progress-bar" 
-                style={{ width: `${progressPercent}%` }}
-              />
+            <div className="manus-live-track">
+              <div className="manus-live-bar" style={{ width: `${progressPercent}%` }} />
             </div>
-            <div className="manus-progress-steps">
-              {progressSteps.map((step, idx) => {
-                const isCurrentStep = !step.done && idx === progressSteps.filter(p => p.done).length;
+            <div className="manus-live-stream">
+              {progressSteps.filter(p => p.step !== 'thinking').slice(-5).map((step, idx, arr) => {
+                const isLatest = idx === arr.length - 1 && !step.done;
                 return (
-                  <div key={step.step + idx} className={isCurrentStep ? 'manus-progress-step--active' : ''}>
-                    <div className={`manus-progress-step${step.done ? ' manus-progress-step--done' : ''}`}>
-                      <span className="manus-step-indicator">
-                        {step.done ? (
-                          <span className="manus-step-check">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="20 6 9 17 4 12" />
-                            </svg>
-                          </span>
-                        ) : isCurrentStep ? (
-                          <span className="manus-step-pulse" />
-                        ) : (
-                          <span className="manus-step-dot" />
-                        )}
-                      </span>
-                      <span className="manus-step-message">{step.message}</span>
-                      {step.timestamp && (
-                        <span className="manus-step-timestamp">
-                          {(() => {
-                            const elapsed = Math.floor((Date.now() - step.timestamp) / 1000);
-                            if (elapsed < 2) return '';
-                            if (elapsed < 60) return `+${elapsed}s`;
-                            return `+${Math.floor(elapsed / 60)}m`;
-                          })()}
-                        </span>
+                  <div 
+                    key={step.step + step.timestamp} 
+                    className={`manus-live-step ${step.done ? 'done' : ''} ${isLatest ? 'active' : ''}`}
+                  >
+                    <span className="manus-live-dot">
+                      {step.done ? (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      ) : isLatest ? (
+                        <span className="manus-live-pulse" />
+                      ) : (
+                        <span className="manus-live-dot-inner" />
                       )}
-                    </div>
-                    {step.step === 'thinking' && (isThinking || thinkingText) && (
-                      <div className="manus-step-thinking">
-                        <div className="manus-step-thinking-header">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="12" cy="12" r="10" />
-                            <path d="M12 16v-4" />
-                            <path d="M12 8h.01" />
-                          </svg>
-                          <span className="manus-step-thinking-label">
-                            {isThinking ? 'AI thinking...' : 'Thought process'}
-                          </span>
-                          {isThinking && <span className="manus-step-thinking-spinner" />}
-                        </div>
-                        <pre>{thinkingText}</pre>
-                      </div>
-                    )}
+                    </span>
+                    <span className="manus-live-msg">{step.message}</span>
                   </div>
                 );
               })}

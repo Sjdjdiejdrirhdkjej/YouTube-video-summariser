@@ -547,7 +547,122 @@
   font-weight: 500;
 }
 
-/* Progress panel (glass) */
+/* Live streaming progress panel */
+.manus-live-progress {
+  margin: 24px 0 20px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  backdrop-filter: blur(16px);
+  overflow: hidden;
+  animation: manus-fade-up 0.3s ease-out;
+}
+
+.manus-live-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #e4e4e7;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.manus-live-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(129, 140, 248, 0.2);
+  border-top-color: #818cf8;
+  border-radius: 50%;
+  animation: manus-spin 0.6s linear infinite;
+}
+
+.manus-live-title {
+  flex: 1;
+}
+
+.manus-live-time {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #71717a;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+.manus-live-track {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.manus-live-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6, #a855f7);
+  border-radius: 0 2px 2px 0;
+  transition: width 0.4s ease-out;
+}
+
+.manus-live-stream {
+  padding: 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.manus-live-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8125rem;
+  color: #52525b;
+  transition: all 0.3s ease;
+}
+
+.manus-live-step.done {
+  color: #71717a;
+}
+
+.manus-live-step.active {
+  color: #a1a1aa;
+}
+
+.manus-live-dot {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.manus-live-dot-inner {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.manus-live-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #818cf8;
+  animation: manus-pulse-ring 1.2s ease-in-out infinite;
+}
+
+.manus-live-step.done .manus-live-dot svg {
+  color: #4ade80;
+}
+
+.manus-live-msg {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Legacy progress panel (glass) - kept for reference */
 .manus-progress {
   margin: 24px 0 20px;
   padding: 0;

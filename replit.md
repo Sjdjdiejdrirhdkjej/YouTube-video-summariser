@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Summa** is a full-stack YouTube video summarizer web application. Users paste a YouTube video URL and receive an AI-generated summary using a hybrid approach that combines Google Gemini (direct video processing) and Cohere (transcript fusion with reasoning). The app supports streaming responses, chat-with-summary functionality, shareable summary links, persistent conversations, and an IP/fingerprint-based credit system for rate limiting.
+**Summa** is a full-stack YouTube video summarizer web application. Users paste a YouTube video URL and receive an AI-generated summary using Puter.js v2 AI (500+ models including Claude, GPT, Gemini) with a hybrid approach that gathers video signals (transcript, metadata, chapters, comments) and generates summaries client-side. The app supports streaming responses, chat-with-summary functionality, shareable summary links, persistent conversations, and an IP/fingerprint-based credit system for rate limiting.
 
 ## User Preferences
 
@@ -32,7 +32,7 @@ Preferred communication style: Simple, everyday language.
 | Endpoint | Method | Purpose | Credit Cost |
 |---|---|---|---|
 | `/api/summarize` | POST | Summarize via Gemini | 5 |
-| `/api/summarize-hybrid` | POST | Summarize via Cohere hybrid fusion | 3 |
+| `/api/summarize-hybrid` | POST | Gather video signals and build prompt | 3 |
 | `/api/chat` | POST | Chat about a summary | 1 |
 | `/api/credits` | GET | Check credit balance | 0 |
 | `/api/summary/:id` | GET | Retrieve shared summary | 0 |
@@ -51,8 +51,8 @@ These signals are fused into a prompt for the AI model.
 
 ### AI Integration Flow
 - **Gemini path** (`/api/summarize`): Uses `@google/genai` / `@google/generative-ai` with `gemini-2.0-flash-exp` for direct video processing
-- **Hybrid path** (`/api/summarize-hybrid`): Gathers all YouTube signals, builds a fusion prompt, sends to Cohere `command-a-reasoning-08-2025`, streams response via SSE
-- **Chat**: Uses Cohere for conversational follow-up about summaries
+- **Hybrid path** (`/api/summarize-hybrid`): Gathers all YouTube signals, builds a fusion prompt, sends prompt to client which uses Puter.js v2 AI for streaming summarization
+- **Chat**: Uses Puter.js v2 AI for conversational follow-up about summaries
 - **Thinking display**: AI reasoning/thinking tokens are streamed to the client and shown in a collapsible panel
 
 ### Credit System
@@ -69,7 +69,7 @@ These signals are fused into a prompt for the AI model.
 - Configured for **Vercel** deployment with `vercel.json` rewrites
 - API routes go to `server/index.ts` (Node.js 20.x runtime)
 - All other routes serve `index.html` (SPA)
-- Environment variables: `GEMINI_API_KEY`, `COHERE_API_KEY`
+- Environment variables: `PUTER_AUTH_TOKEN` (optional for server-side AI)
 
 ### Replit Integration Files
 The `server/replit_integrations/` directory contains pre-scaffolded integration modules (audio, chat, image, batch processing) that use the Replit AI Model Farm (`AI_INTEGRATIONS_OPENAI_API_KEY`). These are **template code** and not actively used by the main summarizer app. They reference a Drizzle + PostgreSQL setup with a `db` import from `../../db` and shared schema from `@shared/schema` — these files don't exist yet in the main app.
@@ -78,7 +78,7 @@ The `server/replit_integrations/` directory contains pre-scaffolded integration 
 
 ### AI Services (Required)
 - **Google Gemini API** (`GEMINI_API_KEY`) — Used for direct video summarization via `@google/genai` and `@google/generative-ai` packages
-- **Cohere API** (`COHERE_API_KEY`) — Used for hybrid transcript fusion summarization and chat via `cohere-ai` package. Model: `command-a-reasoning-08-2025`
+- **Puter.js v2** (`PUTER_AUTH_TOKEN`) — Used for AI summarization and chat via `@heyputer/puter.js` package. Supports 500+ models (Claude, GPT, Gemini, etc.) with user-pays model on client side
 
 ### AI Services (Optional / Scaffolded)
 - **Replit AI Model Farm** (`AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL`) — OpenAI-compatible API for image generation, audio, and chat. Only used by integration template files, not the main app.
@@ -97,7 +97,7 @@ The `server/replit_integrations/` directory contains pre-scaffolded integration 
 - `vite` v3 + `@vitejs/plugin-react` — Frontend build
 - `react` v18 — UI framework
 - `marked` — Markdown to HTML rendering
-- `cohere-ai` — Cohere API client
+- `@heyputer/puter.js` — Puter.js v2 AI client
 - `@google/genai`, `@google/generative-ai` — Google Gemini clients
 - `cors` — CORS middleware
 - `dotenv` — Environment variable loading

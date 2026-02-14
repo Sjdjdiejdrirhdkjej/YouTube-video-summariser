@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-The Video Summarizer is a full-stack web application built with React, TypeScript, and Vite for the frontend, and Express.js for the backend. It enables users to paste YouTube video URLs and receive AI-generated summaries using either Google's Gemini or Cohere AI models. The application features a hybrid summarization approach that combines multiple signals (transcripts, metadata, chapters, comments) for more comprehensive summaries.
+The Video Summarizer is a full-stack web application built with React, TypeScript, and Vite for the frontend, and Express.js for the backend. It enables users to paste YouTube video URLs and receive AI-generated summaries using Puter.js v2 AI (500+ models including Claude, GPT, Gemini). The application features a hybrid summarization approach that combines multiple signals (transcripts, metadata, chapters, comments) for more comprehensive summaries.
 
 ### Key Technologies
 - **Frontend**: React 18, TypeScript, Vite
 - **Backend**: Node.js, Express.js
-- **AI Models**: Google Gemini (direct video processing), Cohere (hybrid fusion approach)
-- **Additional Libraries**: marked (Markdown parsing), youtube-transcript, cohere-ai, @google/generative-ai
+- **AI Models**: Puter.js v2 AI (Claude, GPT, Gemini, and 500+ more), Google Gemini (direct video processing)
+- **Additional Libraries**: marked (Markdown parsing), @heyputer/puter.js, @google/generative-ai
 - **Styling**: CSS with theme support
 
 ### Architecture
@@ -22,7 +22,7 @@ The application follows a client-server architecture:
 ### Prerequisites
 - Node.js (v18 or later recommended)
 - npm or bun
-- API keys for Google Gemini and Cohere
+- Puter.js v2 auth token (optional for server-side; client uses user-pays model)
 
 ### Setup
 1. Clone the repository
@@ -35,7 +35,7 @@ The application follows a client-server architecture:
 3. Copy `.env.example` to `.env` and add your API keys:
    ```
    GEMINI_API_KEY=your_gemini_api_key
-   COHERE_API_KEY=your_cohere_api_key
+   PUTER_AUTH_TOKEN=your_puter_auth_token
    ```
 4. Run the development server:
    ```bash
@@ -53,7 +53,7 @@ The application follows a client-server architecture:
 
 ### API Endpoints
 - `POST /api/summarize` - Summarize using Gemini (5 credits)
-- `POST /api/summarize-hybrid` - Summarize using Cohere with video metadata (3 credits)
+- `POST /api/summarize-hybrid` - Gather video signals and build prompt for client-side AI summarization
 - `POST /api/chat` - Chat about a summary (1 credit)
 - `GET /api/summary/:id` - Retrieve a shared summary
 - `GET /api/chat/:id` - Retrieve a shared chat

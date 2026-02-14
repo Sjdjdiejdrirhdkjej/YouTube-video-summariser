@@ -1,6 +1,7 @@
 import React from 'react';
 import { marked } from 'marked';
 import { useError } from '../context/ErrorContext';
+import { puterClient } from '../lib/puterClient';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -43,14 +44,103 @@ export default function Chat({ summary, videoUrl, onClose }: ChatProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = async () => {
+const handleSend = async () => {
     const text = input.trim();
     if (!text || streaming) return;
+
+    // Check Puter auth for real mode
+    if (!puterClient.isSignedIn() && import.meta.env.VITE_PUTER_MOCK !== '1') {
+      alert('Please sign in with Puter to use chat');
+      return;
+    }
 
     const userMessage: Message = { role: 'user', content: text };
     const updateMessages = (updater: (prev: Message[]) => Message[]) => {
       setMessages(prev => updater(prev));
     };
+
+    updateMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setStreaming(true);
+    assistantRef.current = '';
+    thinkingRef.current = '';
+    setThinkingText('');
+    setIsThinking(false);
+
+    updateMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+
+    try {
+      const abortController = new AbortController();
+      abortRef.current = abortController;
+
+      // Prepare messages for Puter
+      const puterMessages = [
+        { role: 'system' as const, content: `You are discussing a YouTube video. Summary: ${summary}\nVideo URL: ${videoUrl}` },
+        ...messages.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
+        { role: 'user' as const, content: text }
+      ];
+
+      // Stream response from Puter
+      const stream = puterClient.chatStream(puterMessages, { stream: true });
+      
+      for await (const event of stream) {
+        if (abortController.signal.aborted) break;
+        
+        if (event.thinking) {
+          thinkingRef.current += event.thinking;
+          setThinkingText(thinkingRef.current);
+          setIsThinking(true);
+        }
+        
+        if (event.text) {
+          assistantRef.current += event.text;
+          updateMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
+            return newMessages;
+          });
+        }
+      }
+
+      if (abortController.signal.aborted) {
+        setStreaming(false);
+        return;
+      }
+
+      // Persist chat after completion
+      if (assistantRef.current && !chatId) {
+        try {
+          const persistRes = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoUrl,
+              summary,
+              messages: [...messages, { role: 'user', content: text }, { role: 'assistant', content: assistantRef.current }]
+            }),
+          });
+
+          if (persistRes.ok) {
+            const { chatId: newChatId } = await persistRes.json();
+            setChatId(newChatId);
+          }
+        } catch (e) {
+          console.error('Failed to persist chat:', e);
+        }
+      }
+
+      setStreaming(false);
+    } catch (err) {
+      addError(err);
+      assistantRef.current = err instanceof Error ? err.message : String(err);
+      updateMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1] = { role: 'assistant', content: assistantRef.current };
+        return newMessages;
+      });
+      setStreaming(false);
+    }
+  };
 
     updateMessages(prev => [...prev, userMessage]);
     setInput('');

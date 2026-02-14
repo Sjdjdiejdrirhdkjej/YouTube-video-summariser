@@ -5,9 +5,7 @@ services:
     buildCommand: npm run build
     startCommand: node server/index.js
     envVars:
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: COHERE_API_KEY
+      - key: PUTER_AUTH_TOKEN
         sync: false
     scaling:
       minInstances: 1

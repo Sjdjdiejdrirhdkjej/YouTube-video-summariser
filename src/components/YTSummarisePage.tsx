@@ -1,6 +1,7 @@
 import React from 'react';
 import { marked } from 'marked';
 import { useError } from '../context/ErrorContext';
+import { puterClient } from '../lib/puterClient';
 import './manus-theme.css';
 
 interface YTSummarisePageProps {
@@ -79,22 +80,12 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
   const abortControllerRef = React.useRef<AbortController | null>(null);
   const skeletonTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [credits, setCredits] = React.useState<number | null>(null);
   const [sources, setSources] = React.useState<string[]>([]);
+  const [puterSignedIn, setPuterSignedIn] = React.useState(false);
 
   React.useEffect(() => {
-    fetch('/api/credits', { headers: { 'X-Fingerprint': fingerprint } })
-      .then((r) => r.json())
-      .then((data) => setCredits(data.credits))
-      .catch((e) => {
-        addError(e);
-      });
-  }, [fingerprint]);
-
-  React.useEffect(() => {
-    const handler = (e: Event) => setCredits((e as CustomEvent).detail);
-    window.addEventListener('credits-update', handler);
-    return () => window.removeEventListener('credits-update', handler);
+    // Check Puter auth status
+    setPuterSignedIn(puterClient.isSignedIn());
   }, []);
 
   React.useEffect(() => {
@@ -125,6 +116,16 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
     return match ? match[1] : null;
   };
 
+  const handleSignIn = async () => {
+    try {
+      await puterClient.signIn();
+      setPuterSignedIn(true);
+    } catch (err) {
+      addError(err);
+      setError('Failed to sign in with Puter');
+    }
+  };
+
   const handleSummarize = async () => {
     if (!videoUrl.trim()) {
       setError('Please enter a YouTube video URL');
@@ -139,8 +140,14 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
       return;
     }
 
+    // Check Puter auth for real mode
+    if (!puterClient.isSignedIn() && import.meta.env.VITE_PUTER_MOCK !== '1') {
+      setError('Please sign in with Puter to use summarization');
+      return;
+    }
+
     setLoading(true);
-    setStreaming(false);
+    setStreaming(true);
     setError('');
     setSummary('');
     setDisplayedSummary('');
@@ -162,169 +169,13 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
       setProgressSteps([]);
       setShowInitialSkeleton(false);
 
-      const parseSSEResponse = async (r: Response): Promise<{ fullSummary: string; thinking: string; summaryId: string | null; credits: number | null }> => {
-        const reader = r.body?.getReader();
-        const decoder = new TextDecoder();
-        if (!reader) throw new Error('No response body');
-
-        let buffer = '';
-        let stopped = false;
-        let fullSummary = '';
-        let returnedThinking = '';
-        let returnedSummaryId: string | null = null;
-        let credits: number | null = null;
-
-        while (!stopped) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          buffer = buffer.replace(/\r\n/g, '\n');
-
-          const events = buffer.split('\n\n');
-          buffer = events.pop() || '';
-
-          for (const evt of events) {
-            const dataLines = evt
-              .split('\n')
-              .filter((l) => l.startsWith('data:'))
-              .map((l) => l.slice(5).replace(/^ /, ''));
-
-            if (!dataLines.length) continue;
-
-            const data = dataLines.join('\n');
-            if (data === '[DONE]') {
-              stopped = true;
-              break;
-            }
-
-            try {
-              const parsed = JSON.parse(data);
-
-              if (parsed.progress) {
-                const { step, message, thinking, timestamp } = parsed.progress;
-                
-                if (thinking) {
-                  thinkingRef.current += thinking;
-                  setThinkingText(thinkingRef.current);
-                  setIsThinking(true);
-                }
-                
-                if (message) {
-                  const stepMap: Record<string, string> = {
-                    'generating': 'analyzing',
-                    'analyzing': 'analyzing',
-                    'reasoning': 'reasoning',
-                    'drafting': 'drafting',
-                    'refining': 'refining',
-                    'processing': 'processing',
-                    'validating': 'validating',
-                    'fallback': 'fallback',
-                    'metadata': 'metadata',
-                    'transcript': 'transcript',
-                    'chapters': 'chapters',
-                    'description': 'description',
-                    'comments': 'comments',
-                    'missing': 'missing',
-                    'gathering': 'gathering',
-                  };
-                  const mappedStep = stepMap[step] || step;
-                  
-                  const granularSteps = ['start', 'analyzing', 'reasoning', 'drafting', 'refining', 'processing'];
-                  if (granularSteps.includes(mappedStep)) {
-                    setProgressSteps(prev => {
-                      const hasGranular = prev.some(p => granularSteps.includes(p.step));
-                      if (hasGranular && mappedStep !== 'thinking') {
-                        const idx = prev.findIndex(p => p.step === mappedStep);
-                        if (idx >= 0) {
-                          const updated = [...prev];
-                          updated[idx] = { ...updated[idx], message, done: step === 'complete', timestamp };
-                          return updated;
-                        }
-                      }
-                      return [...prev, { step: mappedStep, message, done: step === 'complete', timestamp }];
-                    });
-                  } else {
-                    setProgressSteps(prev => {
-                      const idx = prev.findIndex(p => p.step === step);
-                      if (idx >= 0) {
-                        const updated = [...prev];
-                        updated[idx] = { step, message, done: step === 'complete', timestamp };
-                        return updated;
-                      }
-                      return [...prev, { step, message, done: step === 'complete', timestamp }];
-                    });
-                  }
-                }
-              }
-
-              if (parsed.summary) {
-                fullSummary = parsed.summary;
-                returnedSummaryId = parsed.summaryId;
-                returnedThinking = parsed.thinking || '';
-                if (typeof parsed.credits === 'number') {
-                  credits = parsed.credits;
-                  setCredits(parsed.credits);
-                }
-                if (Array.isArray(parsed.sources)) {
-                  setSources(parsed.sources);
-                }
-                // Mark complete
-                setProgressPercent(100);
-              }
-
-              if (parsed.error) {
-                if (parsed.retryAfter) setRetryAfter(parsed.retryAfter as number);
-                setError(parsed.error as string);
-                setLoading(false);
-                stopped = true;
-                break;
-              }
-            } catch (e) {
-              console.error('SSE parse error:', e, 'Raw data:', data);
-              addError(e);
-            }
-          }
-        }
-
-        // Process any remaining buffer data (handles case where [DONE] comes without trailing \n\n)
-        const trimmed = buffer.trim();
-        if (trimmed && trimmed.startsWith('data:')) {
-          const data = trimmed.replace(/^data:\s*/, '');
-          if (data && data !== '[DONE]') {
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.summary) {
-                fullSummary = parsed.summary;
-                returnedSummaryId = parsed.summaryId;
-                returnedThinking = parsed.thinking || '';
-                if (typeof parsed.credits === 'number') {
-                  credits = parsed.credits;
-                  setCredits(parsed.credits);
-                }
-                if (Array.isArray(parsed.sources)) {
-                  setSources(parsed.sources);
-                }
-                setProgressPercent(100);
-              }
-            } catch (e) {
-              console.error('Final buffer parse error:', e);
-            }
-          }
-        }
-
-        try {
-          await reader.cancel();
-        } catch (e) {
-          addError(e);
-        }
-        return { fullSummary, thinking: returnedThinking, summaryId: returnedSummaryId, credits };
-      };
-
+      // First, get prompt from backend
+      setProgressSteps([{ step: 'gathering', message: 'Gathering video signals...', done: false }]);
+      
       let r = await fetch('/api/summarize-hybrid', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Fingerprint': fingerprint },
-        body: JSON.stringify({ videoUrl: videoUrl.trim(), analysisMode }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoUrl: videoUrl.trim() }),
         signal: abortController.signal,
       });
 
@@ -342,30 +193,120 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
         return;
       }
 
-      let result = await parseSSEResponse(r);
+      // Parse SSE response for prompt
+      const reader = r.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error('No response body');
 
-      const { fullSummary, thinking: returnedThinking, summaryId: returnedSummaryId } = result;
+      let buffer = '';
+      let prompt = '';
+      let sources: string[] = [];
 
-      if (!fullSummary.trim()) {
-        setError('Could not generate a summary for this video. The video may be unavailable or restricted.');
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        buffer = buffer.replace(/\r\n/g, '\n');
+
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+
+        for (const evt of events) {
+          const dataLines = evt
+            .split('\n')
+            .filter((l) => l.startsWith('data:'))
+            .map((l) => l.slice(5).replace(/^ /, ''));
+
+          if (!dataLines.length) continue;
+
+          const data = dataLines.join('\n');
+          if (data === '[DONE]') {
+            break;
+          }
+
+          try {
+            const parsed = JSON.parse(data);
+            
+            if (parsed.progress) {
+              const { step, message } = parsed.progress;
+              setProgressSteps(prev => [...prev, { step, message, done: false }]);
+            }
+            
+            if (parsed.prompt) {
+              prompt = parsed.prompt;
+              if (Array.isArray(parsed.sources)) {
+                sources = parsed.sources;
+                setSources(parsed.sources);
+              }
+              setProgressSteps(prev => [...prev.filter(p => p.step !== 'gathering'), { step: 'gathering', message: 'Video signals gathered', done: true }]);
+            }
+          } catch (e) {
+            console.error('SSE parse error:', e);
+          }
+        }
+      }
+
+      if (!prompt) {
+        setError('Failed to generate prompt from video');
         setLoading(false);
-        abortControllerRef.current = null;
         return;
       }
 
-      if (returnedSummaryId) {
-        setSummaryId(returnedSummaryId);
+      // Now use Puter to generate summary
+      setProgressSteps(prev => [...prev, { step: 'processing', message: 'Generating summary with AI...', done: false }]);
+      
+      let fullSummary = '';
+      const stream = puterClient.summarizeStream(prompt, { stream: true });
+      
+      for await (const event of stream) {
+        if (abortController.signal.aborted) break;
+        
+        if (event.thinking) {
+          thinkingRef.current += event.thinking;
+          setThinkingText(thinkingRef.current);
+          setIsThinking(true);
+        }
+        
+        if (event.text) {
+          fullSummary += event.text;
+          setDisplayedSummary(fullSummary);
+          setProgressSteps(prev => {
+            const hasProcessing = prev.some(p => p.step === 'processing');
+            if (hasProcessing) {
+              return prev.map(p => p.step === 'processing' ? { ...p, done: true } : p);
+            }
+            return prev;
+          });
+        }
       }
 
-      if (returnedThinking.trim()) {
-        thinkingRef.current = returnedThinking;
-        setThinkingText(returnedThinking);
-        setIsThinking(false);
+      if (abortController.signal.aborted) {
+        setLoading(false);
+        return;
       }
 
-      summaryRef.current = fullSummary;
+      // Persist summary to backend
+      setProgressSteps(prev => [...prev, { step: 'saving', message: 'Saving summary...', done: false }]);
+      
+      const persistRes = await fetch('/api/summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoUrl, summary: fullSummary, sources }),
+      });
+
+      if (!persistRes.ok) {
+        setError('Failed to save summary');
+        setLoading(false);
+        return;
+      }
+
+      const { summaryId: persistedSummaryId } = await persistRes.json();
+      setSummaryId(persistedSummaryId);
+      
+      setProgressSteps(prev => [...prev.map(p => p.step === 'saving' ? { ...p, done: true } : p)]);
+      setProgressPercent(100);
       setSummary(fullSummary);
-      setDisplayedSummary(fullSummary);
       setLoading(false);
       setStreaming(false);
       abortControllerRef.current = null;
@@ -442,8 +383,21 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
           Back
         </button>
         <span className="manus-nav-brand">VidGist</span>
-        <div className="manus-nav-credits">
-          {credits !== null ? `${credits} credits` : '\u00A0'}
+        <div className="manus-nav-auth">
+          {puterSignedIn ? (
+            <span className="manus-auth-status">Signed in</span>
+          ) : import.meta.env.VITE_PUTER_MOCK === '1' ? (
+            <span className="manus-auth-status">Mock Mode</span>
+          ) : (
+            <button
+              type="button"
+              className="manus-auth-button"
+              onClick={handleSignIn}
+              disabled={loading || streaming}
+            >
+              Sign in with Puter
+            </button>
+          )}
         </div>
       </nav>
 

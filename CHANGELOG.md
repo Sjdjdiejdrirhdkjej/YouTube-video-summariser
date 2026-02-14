@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Migrated from Cohere to Puter.js v2 for AI summarization and chat** — all LLM calls now use Puter.js v2 AI (`@heyputer/puter.js`) with proper streaming support (`stream: true`), reasoning/thinking token display, and access to 500+ models (Claude, GPT, Gemini, etc.). Cohere API dependency removed.
+- **Updated preferred AI models** — default model preferences updated to `claude-sonnet-4`, `gpt-4o`, `claude-sonnet-4-5` for better availability and performance.
+- **Client-side AI with user-pays model** — summarization and chat now run client-side via Puter.js v2, eliminating the need for server-side API keys for AI calls.
+
 ### Fixed
 
 - **Fixed "Could not generate a summary" error** — SSE error events from the server are now properly displayed to the user instead of being swallowed, which caused a generic unhelpful error message.

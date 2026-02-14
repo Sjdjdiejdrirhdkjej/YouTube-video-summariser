@@ -11,7 +11,7 @@ npm run dev
 
 ## Features
 
-- Summarize YouTube videos using Gemini or Cohere AI models
+- Summarize YouTube videos using Puter.js v2 AI (500+ models including Claude, GPT, Gemini)
 - Chat with the video summary
 - Dark/light theme
 - Responsive UI
@@ -20,20 +20,19 @@ npm run dev
 
 ## Configuration
 
-Copy `.env.example` to `.env` and add your API keys:
+Copy `.env.example` to `.env` and configure:
 
 ```
-GEMINI_API_KEY=your_gemini_api_key
-COHERE_API_KEY=your_cohere_api_key
+PUTER_AUTH_TOKEN=your_puter_auth_token
 ```
 
-- `GEMINI_API_KEY`: Required for `/api/summarize` (uses gemini-2.0-flash-exp)
-- `COHERE_API_KEY`: Required for `/api/summarize-hybrid` (uses command-a-reasoning-08-2025) and chat functionality
+- `PUTER_AUTH_TOKEN`: Required for server-side AI (obtain via `node setup-puter-auth.js`)
+- Client-side AI uses Puter.js v2 directly (user-pays model, no server API key needed)
 
 ## API Endpoints
 
 - `POST /api/summarize` - Summarize using Gemini (5 credits)
-- `POST /api/summarize-hybrid` - Summarize using Cohere with video metadata (3 credits)
+- `POST /api/summarize-hybrid` - Gather video signals and build prompt for client-side AI summarization
 - `POST /api/chat` - Chat about a summary (1 credit)
 - `GET /api/summary/:id` - Retrieve a shared summary
 - `GET /api/chat/:id` - Retrieve a shared chat

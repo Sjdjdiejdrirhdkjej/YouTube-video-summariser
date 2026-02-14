@@ -5,8 +5,7 @@
 ### Prerequisites
 - Vercel account (free at [vercel.com](https://vercel.com))
 - API Keys required:
-  - `GEMINI_API_KEY` - For Gemini AI summarization
-  - `COHERE_API_KEY` - For Cohere AI summarization and chat
+  - `PUTER_AUTH_TOKEN` - For Puter.js v2 server-side AI (optional, client uses user-pays model)
 
 ### Option 1: Vercel CLI (Recommended)
 
@@ -27,8 +26,7 @@ vercel --prod
 
 4. Set environment variables in Vercel Dashboard:
    - Go to your project settings → Environment Variables
-   - Add `GEMINI_API_KEY`: Get from [Google AI Studio](https://makersuite.google.com/app/apikey)
-   - Add `COHERE_API_KEY`: Get from [Cohere Dashboard](https://dashboard.cohere.com/api-keys)
+   - Add `PUTER_AUTH_TOKEN`: Obtain via `node setup-puter-auth.js`
 
 5. Redeploy after setting variables:
 ```bash
@@ -49,7 +47,7 @@ vercel --prod
 
 ### Prerequisites
 - Render account (free at [render.com](https://render.com))
-- API Keys (GEMINI_API_KEY, COHERE_API_KEY)
+- API Keys (PUTER_AUTH_TOKEN)
 
 ### Steps
 
@@ -92,8 +90,7 @@ railway up
 
 4. Set environment variables:
 ```bash
-railway variables set GEMINI_API_KEY=your_key_here
-railway variables set COHERE_API_KEY=your_key_here
+railway variables set PUTER_AUTH_TOKEN=your_token_here
 ```
 
 ---
@@ -102,8 +99,7 @@ railway variables set COHERE_API_KEY=your_key_here
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `GEMINI_API_KEY` | Google Gemini API key for direct video summarization | Yes |
-| `COHERE_API_KEY` | Cohere API key for hybrid summarization and chat | Yes |
+| `PUTER_AUTH_TOKEN` | Puter.js v2 auth token for server-side AI | Optional |
 
 ---
 
@@ -132,11 +128,10 @@ The current implementation uses in-memory storage (`Map` objects) for:
 2. Click "Create API Key"
 3. Copy and use as `GEMINI_API_KEY`
 
-**Cohere API Key:**
-1. Go to [Cohere Dashboard](https://dashboard.cohere.com/api-keys)
-2. Sign up/login
-3. Create new API key
-4. Copy and use as `COHERE_API_KEY`
+**Puter Auth Token:**
+1. Run `node setup-puter-auth.js`
+2. Follow the browser login flow
+3. Copy the token and use as `PUTER_AUTH_TOKEN`
 
 ---
 

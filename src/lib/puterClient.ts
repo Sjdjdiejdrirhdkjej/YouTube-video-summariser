@@ -165,22 +165,62 @@ class PuterClient {
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const respAny = response as any;
-        console.log(`[Puter AI] Response received — type: ${typeof response}, asyncIterable: ${!!respAny?.[Symbol.asyncIterator]}`);
+        console.log(`[Puter AI] Response received — type: ${typeof response}, hasIterator: ${!!(respAny?.[Symbol.asyncIterator])}, keys: ${respAny ? Object.keys(respAny).join(', ') : 'none'}`);
 
+        // Handle async iterable (streaming response)
         if (stream && respAny && typeof respAny === 'object' && Symbol.asyncIterator in respAny) {
-          for await (const chunk of respAny as AsyncIterable<{ reasoning?: string; text?: string }>) {
+          let chunkCount = 0;
+          let lastChunkTime = Date.now();
+          const STALL_TIMEOUT_MS = 30_000;
+
+          const iterator = respAny[Symbol.asyncIterator]() as AsyncIterator<{ reasoning?: string; text?: string }>;
+
+          while (true) {
+            // Race between getting next chunk and timeout
+            const nextChunk = iterator.next();
+            const timeoutPromise = new Promise<{ done: true; value: undefined }>((_, reject) => {
+              setTimeout(() => reject(new Error('Stream stalled - no data received for 30 seconds')), STALL_TIMEOUT_MS);
+            });
+
+            let result: IteratorResult<{ reasoning?: string; text?: string }>;
+            try {
+              result = await Promise.race([nextChunk, timeoutPromise]);
+            } catch (err) {
+              // Stream timed out - try to clean up and throw
+              console.warn(`[Puter AI] Stream stalled for ${STALL_TIMEOUT_MS/1000}s, aborting (model: ${selectedModel})`);
+              iterator.return?.();
+              throw err;
+            }
+
+            lastChunkTime = Date.now();
+
+            if (result.done) break;
+
+            const chunk = result.value;
             if (chunk?.reasoning) {
               yield { thinking: chunk.reasoning };
             }
             if (chunk?.text) {
               yield { text: chunk.text };
+              chunkCount++;
             }
           }
+
+          console.log(`[Puter AI] Stream completed with ${chunkCount} chunks`);
+          if (chunkCount === 0) {
+            throw new Error(`Empty streaming response from Puter AI (model: ${selectedModel})`);
+          }
           return;
-        } else if (typeof response === 'string') {
+        }
+
+        // Handle non-streaming string response
+        if (typeof response === 'string') {
           yield { text: response };
           return;
-        } else if (respAny && typeof respAny === 'object') {
+        }
+
+        // Handle non-streaming object response
+        if (respAny && typeof respAny === 'object') {
           const resp = respAny as { message?: { content?: string }; text?: string };
           if (resp.message?.content) {
             yield { text: resp.message.content };
@@ -190,6 +230,9 @@ class PuterClient {
             return;
           }
         }
+
+        // If we get here, response format is unrecognized
+        console.error(`[Puter AI] Unrecognized response format:`, JSON.stringify(response).slice(0, 500));
         throw new Error(`Unrecognized response format from Puter AI (model: ${selectedModel})`);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

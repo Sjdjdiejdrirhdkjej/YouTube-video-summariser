@@ -29,11 +29,13 @@
     "vite": "^3.0.4"
   },
   "dependencies": {
+    "@augmentcode/auggie": "^0.16.1",
+    "@continuedev/cli": "^1.5.43",
     "@google/genai": "^1.40.0",
     "@google/generative-ai": "^0.24.1",
     "@openai/codex": "^0.98.0",
     "@qwen-code/qwen-code": "^0.10.1",
-    "@sourcegraph/amp": "^0.0.1770768480-ge56951",
+    "@sourcegraph/amp": "^0.0.1771043393-g8c86b8",
     "algoliasearch": "^5.48.0",
     "codebuff": "^1.0.617",
     "cohere-ai": "^7.20.0",

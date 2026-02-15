@@ -493,84 +493,34 @@
   backdrop-filter: blur(16px);
 }
 
-/* Initial loading */
-.manus-initial-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 260px;
-  animation: manus-fade-up 0.3s ease-out;
-  padding-top: 60px;
-}
-
-.manus-initial-loading-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-}
-
-.manus-initial-loading-icon {
-  width: 72px;
-  height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(168, 85, 247, 0.12));
-  border: 1px solid rgba(129, 140, 248, 0.2);
-  color: #818cf8;
-  border-radius: 50%;
-  animation: manus-pulse-ring 2s ease-in-out infinite;
-}
-
-.manus-initial-dots {
-  display: flex;
-  gap: 8px;
-}
-
-.manus-initial-dots span {
-  width: 7px;
-  height: 7px;
-  background: #818cf8;
-  border-radius: 50%;
-  animation: manus-dot-bounce 1.4s ease-in-out infinite;
-}
-
-.manus-initial-dots span:nth-child(1) { animation-delay: 0s; }
-.manus-initial-dots span:nth-child(2) { animation-delay: 0.2s; }
-.manus-initial-dots span:nth-child(3) { animation-delay: 0.4s; }
-
-.manus-initial-text {
-  margin: 0;
-  font-size: 0.875rem;
-  color: #71717a;
-  font-weight: 500;
-}
-
-/* Live streaming progress panel */
-.manus-live-progress {
+/* Live thinking stream panel */
+.manus-thinking-stream {
   margin: 24px 0 20px;
   padding: 0;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.07);
+  border-left: 3px solid rgba(129, 140, 248, 0.5);
   border-radius: 16px;
   backdrop-filter: blur(16px);
   overflow: hidden;
   animation: manus-fade-up 0.3s ease-out;
 }
 
-.manus-live-progress-header {
+.manus-thinking-stream-header {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 14px 20px;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #e4e4e7;
+  color: #818cf8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(129, 140, 248, 0.06);
 }
 
-.manus-live-spinner {
+.manus-thinking-stream-spinner {
   width: 14px;
   height: 14px;
   border: 2px solid rgba(129, 140, 248, 0.2);
@@ -579,117 +529,44 @@
   animation: manus-spin 0.6s linear infinite;
 }
 
-.manus-live-title {
+.manus-thinking-stream-title {
   flex: 1;
 }
 
-.manus-live-time {
+.manus-thinking-stream-time {
   font-size: 0.7rem;
   font-weight: 500;
   color: #71717a;
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
-.manus-live-track {
-  height: 3px;
-  background: rgba(255, 255, 255, 0.06);
-  overflow: hidden;
-}
-
-.manus-live-bar {
-  height: 100%;
-  background: linear-gradient(90deg, #6366f1, #8b5cf6, #a855f7);
-  border-radius: 0 2px 2px 0;
-  transition: width 0.4s ease-out;
-}
-
-.manus-live-stream {
-  padding: 12px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.manus-live-step {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.8125rem;
-  color: #52525b;
-  transition: all 0.3s ease;
-}
-
-.manus-live-step.done {
-  color: #71717a;
-}
-
-.manus-live-step.active {
+.manus-thinking-stream-content {
+  margin: 0;
+  padding: 16px 20px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
   color: #a1a1aa;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
-.manus-live-dot {
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+.manus-thinking-stream-content::-webkit-scrollbar {
+  width: 4px;
 }
 
-.manus-live-dot-inner {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.15);
+.manus-thinking-stream-content::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-.manus-live-pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #818cf8;
-  animation: manus-pulse-ring 1.2s ease-in-out infinite;
-}
-
-.manus-live-step.done .manus-live-dot svg {
-  color: #4ade80;
-}
-
-.manus-live-msg {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Legacy progress panel (glass) - kept for reference */
-.manus-progress {
-  margin: 24px 0 20px;
-  padding: 0;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 16px;
-  backdrop-filter: blur(16px);
-  overflow: hidden;
-  animation: manus-fade-up 0.3s ease-out;
-}
-
-.manus-progress-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 20px;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: #e4e4e7;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.manus-progress-time {
-  font-size: 0.7rem;
-  font-weight: 500;
-  color: #71717a;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+.manus-thinking-stream-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
 }
 
 .manus-cancel-btn {
@@ -713,197 +590,6 @@
   background: rgba(239, 68, 68, 0.2);
   color: #fca5a5;
   border-color: rgba(239, 68, 68, 0.4);
-}
-
-.manus-progress-bar-wrap {
-  height: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  overflow: hidden;
-}
-
-.manus-progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, #6366f1, #8b5cf6, #a855f7);
-  border-radius: 0 2px 2px 0;
-  transition: width 0.5s ease-out;
-  animation: manus-progress-bar-pulse 2s ease-in-out infinite;
-}
-
-@keyframes manus-progress-bar-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-.manus-progress-step--active {
-  background: rgba(99, 102, 241, 0.04);
-  border-radius: 8px;
-  margin: 4px 8px;
-  padding: 2px 0;
-}
-
-.manus-step-timestamp {
-  font-size: 0.65rem;
-  color: #52525b;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  margin-left: 8px;
-}
-
-.manus-progress-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(129, 140, 248, 0.2);
-  border-top-color: #818cf8;
-  border-radius: 50%;
-  animation: manus-spin 0.6s linear infinite;
-}
-
-.manus-progress-steps {
-  padding: 10px 0;
-}
-
-.manus-progress-step {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 20px;
-  font-size: 0.8125rem;
-  color: #a1a1aa;
-  transition: color 0.2s ease;
-}
-
-.manus-progress-step--done {
-  color: #71717a;
-}
-
-.manus-step-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-}
-
-.manus-step-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.manus-step-pulse {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #818cf8;
-  animation: manus-pulse-ring 1.2s ease-in-out infinite;
-}
-
-.manus-step-check svg {
-  color: #4ade80;
-  stroke-dasharray: 24;
-  stroke-dashoffset: 0;
-  animation: manus-check-draw 0.3s ease-out;
-}
-
-.manus-step-message {
-  flex: 1;
-}
-
-.manus-step-thinking {
-  margin: 4px 20px 10px 52px;
-  padding: 10px 14px;
-  background: rgba(129, 140, 248, 0.06);
-  border-left: 2px solid rgba(129, 140, 248, 0.3);
-  border-radius: 0 10px 10px 0;
-  animation: manus-fade-in 0.2s ease;
-}
-
-.manus-step-thinking-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-
-.manus-step-thinking-label {
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: #818cf8;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.manus-step-thinking-spinner {
-  width: 10px;
-  height: 10px;
-  border: 2px solid rgba(129, 140, 248, 0.2);
-  border-top-color: #818cf8;
-  border-radius: 50%;
-  animation: manus-spin 0.6s linear infinite;
-}
-
-.manus-step-thinking pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 0.7rem;
-  line-height: 1.5;
-  color: #a1a1aa;
-  max-height: 120px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-/* Thinking panel (glass) */
-.manus-thinking {
-  margin-bottom: 20px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-left: 3px solid rgba(129, 140, 248, 0.5);
-  border-radius: 12px;
-  backdrop-filter: blur(16px);
-  overflow: hidden;
-  animation: manus-fade-up 0.25s ease-out;
-}
-
-.manus-thinking-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 14px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #818cf8;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  background: rgba(129, 140, 248, 0.06);
-}
-
-.manus-thinking-spinner {
-  width: 10px;
-  height: 10px;
-  border: 2px solid rgba(129, 140, 248, 0.2);
-  border-top-color: #818cf8;
-  border-radius: 50%;
-  animation: manus-spin 0.6s linear infinite;
-  margin-left: auto;
-}
-
-.manus-thinking-content {
-  margin: 0;
-  padding: 12px 14px;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 0.7rem;
-  line-height: 1.5;
-  color: #a1a1aa;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  max-height: 200px;
-  overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 /* Result card (glass) */
@@ -1046,23 +732,6 @@
   box-shadow: 0 0 20px rgba(99, 102, 241, 0.12);
 }
 
-/* Scrollbar styling for glass panels */
-.manus-thinking-content::-webkit-scrollbar,
-.manus-step-thinking pre::-webkit-scrollbar {
-  width: 4px;
-}
-
-.manus-thinking-content::-webkit-scrollbar-track,
-.manus-step-thinking pre::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.manus-thinking-content::-webkit-scrollbar-thumb,
-.manus-step-thinking pre::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-}
-
 /* Active input state (when results are showing) */
 .manus-inline-input {
   margin-top: 32px;
@@ -1110,10 +779,6 @@
 
   .manus-result {
     padding: 20px;
-    border-radius: 14px;
-  }
-
-  .manus-progress {
     border-radius: 14px;
   }
 

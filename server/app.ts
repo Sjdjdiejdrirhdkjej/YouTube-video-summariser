@@ -167,69 +167,75 @@ app.post('/api/summarize-hybrid', async (req, res) => {
     const abortController = new AbortController();
     req.on('close', () => abortController.abort());
 
+    const abortCheck = () => {
+      stopHeartbeat?.();
+      stopHeartbeat = null;
+      return;
+    };
+
+    if (abortController.signal.aborted) {
+      abortCheck();
+      return;
+    }
+
+    writeProgress(res, 'analyzing', 'Analyzing video content...');
+    writeProgress(res, 'gathering', 'Gathering video signals...');
+    writeProgress(res, 'metadata', 'Fetching metadata & transcript...');
+
     let signals: VideoSignals;
-
-    if (!abortController.signal.aborted) {
-      writeProgress(res, 'analyzing', 'Analyzing video content...');
-      writeProgress(res, 'gathering', 'Gathering video signals...');
-      writeProgress(res, 'metadata', 'Fetching metadata & transcript...');
-
-      try {
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Request timed out after 20 seconds')), 20000)
-        );
-        signals = await Promise.race([gatherSignals(videoUrl), timeoutPromise]);
-      } catch (e) {
-        console.error('Signal gathering failed, constructing minimal signals:', e);
-        const videoId = extractVideoId(videoUrl) || 'unknown';
-        signals = {
-          videoId,
-          videoUrl,
-          oembed: null,
-          metadata: null,
-          transcript: null,
-          comments: [],
-          missing: { all: e instanceof Error ? e.message : String(e) },
-        };
-      }
-
-  // Report progress: analyzing content
-      if (signals.transcript) {
-        const transcriptLength = signals.transcript.text.length;
-        const lengthInfo = transcriptLength > 10000 ? ` (${Math.round(transcriptLength/1000)}k chars)` : '';
-        writeProgress(res, 'transcript', `Transcript loaded: ${signals.transcript.segmentCount} segments${lengthInfo}`);
-      } else {
-        writeProgress(res, 'transcript', 'No transcript available - using metadata only');
-      }
-
-      if (signals.metadata?.chapters?.length) {
-        writeProgress(res, 'chapters', `${signals.metadata.chapters.length} chapters found`);
-      }
-
-      if (signals.metadata?.description) {
-        const descLen = signals.metadata.description.length;
-        writeProgress(res, 'description', `Description loaded (${descLen} chars)`);
-      }
-
-      if (signals.comments.length) {
-        writeProgress(res, 'comments', `${signals.comments.length} comments loaded`);
-      }
-
-      if (Object.keys(signals.missing).length > 0) {
-        const missingList = Object.keys(signals.missing).join(', ');
-        writeProgress(res, 'missing', `Unavailable: ${missingList}`);
-      }
-
-      if (abortController.signal.aborted) {
-        stopHeartbeat?.();
-        stopHeartbeat = null;
-        return;
-      }
+    try {
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Request timed out after 20 seconds')), 20000)
+      );
+      signals = await Promise.race([gatherSignals(videoUrl), timeoutPromise]);
+    } catch (e) {
+      console.error('Signal gathering failed, constructing minimal signals:', e);
+      const videoId = extractVideoId(videoUrl) || 'unknown';
+      signals = {
+        videoId,
+        videoUrl,
+        oembed: null,
+        metadata: null,
+        transcript: null,
+        comments: [],
+        missing: { all: e instanceof Error ? e.message : String(e) },
+      };
     }
 
     if (abortController.signal.aborted) {
-      stopHeartbeat?.();
-      stopHeartbeat = null;
+      abortCheck();
+      return;
+    }
+
+    // Report progress: analyzing content
+    if (signals.transcript) {
+      const transcriptLength = signals.transcript.text.length;
+      const lengthInfo = transcriptLength > 10000 ? ` (${Math.round(transcriptLength/1000)}k chars)` : '';
+      writeProgress(res, 'transcript', `Transcript loaded: ${signals.transcript.segmentCount} segments${lengthInfo}`);
+    } else {
+      writeProgress(res, 'transcript', 'No transcript available - using metadata only');
+    }
+
+    if (signals.metadata?.chapters?.length) {
+      writeProgress(res, 'chapters', `${signals.metadata.chapters.length} chapters found`);
+    }
+
+    if (signals.metadata?.description) {
+      const descLen = signals.metadata.description.length;
+      writeProgress(res, 'description', `Description loaded (${descLen} chars)`);
+    }
+
+    if (signals.comments.length) {
+      writeProgress(res, 'comments', `${signals.comments.length} comments loaded`);
+    }
+
+    if (Object.keys(signals.missing).length > 0) {
+      const missingList = Object.keys(signals.missing).join(', ');
+      writeProgress(res, 'missing', `Unavailable: ${missingList}`);
+    }
+
+    if (abortController.signal.aborted) {
+      abortCheck();
       return;
     }
 

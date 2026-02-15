@@ -30,14 +30,9 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
   const [streaming, setStreaming] = React.useState(false);
   const [error, setError] = React.useState('');
   const [retryAfter, setRetryAfter] = React.useState(0);
-  const analysisMode = 'hybrid';
   const [summaryId, setSummaryId] = React.useState<string | null>(null);
   const [thinkingText, setThinkingText] = React.useState('');
-  const [isThinking, setIsThinking] = React.useState(false);
-  const [progressSteps, setProgressSteps] = React.useState<Array<{ step: string; message: string; done: boolean; timestamp?: number }>>([]);
-  const [showInitialSkeleton, setShowInitialSkeleton] = React.useState(false);
   const [elapsedSeconds, setElapsedSeconds] = React.useState(0);
-  const [progressPercent, setProgressPercent] = React.useState(0);
 
   // Timer to update elapsed time
   React.useEffect(() => {
@@ -51,34 +46,16 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
     return () => clearInterval(interval);
   }, [loading]);
 
-  // Calculate progress percentage based on completed steps
   React.useEffect(() => {
-    if (!loading) {
-      setProgressPercent(0);
-      return;
+    if (thinkingStreamRef.current) {
+      thinkingStreamRef.current.scrollTop = thinkingStreamRef.current.scrollHeight;
     }
-    if (progressSteps.length === 0) {
-      setProgressPercent(5); // Initial step
-      return;
-    }
-    const doneCount = progressSteps.filter(s => s.done).length;
-    const total = progressSteps.length;
-    const base = Math.round((doneCount / total) * 80);
-    
-    // Add time-based bonus for current step
-    const currentStep = progressSteps.find(s => !s.done);
-    if (currentStep && currentStep.timestamp) {
-      const stepElapsed = (Date.now() - currentStep.timestamp) / 1000;
-      const timeBonus = Math.min(stepElapsed / 3, 15);
-      setProgressPercent(Math.min(Math.round(base + timeBonus), 95));
-    } else {
-      setProgressPercent(base);
-    }
-  }, [loading, progressSteps]);
+  }, [thinkingText]);
+
   const thinkingRef = React.useRef('');
   const summaryRef = React.useRef('');
   const abortControllerRef = React.useRef<AbortController | null>(null);
-  const skeletonTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const thinkingStreamRef = React.useRef<HTMLPreElement | null>(null);
 
   const [sources, setSources] = React.useState<string[]>([]);
   const [puterSignedIn, setPuterSignedIn] = React.useState(false);
@@ -91,9 +68,6 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
   React.useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
-      if (skeletonTimeoutRef.current) {
-        clearTimeout(skeletonTimeoutRef.current);
-      }
     };
   }, []);
 
@@ -153,24 +127,13 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
     setDisplayedSummary('');
     setSummaryId(null);
     setThinkingText('');
-    setIsThinking(false);
     setSources([]);
-    setProgressPercent(0);
     thinkingRef.current = '';
     summaryRef.current = '';
-
-    skeletonTimeoutRef.current = setTimeout(() => {
-      setShowInitialSkeleton(true);
-    }, 300);
 
     try {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
-      setProgressSteps([]);
-      setShowInitialSkeleton(false);
-
-      // First, get prompt from backend
-      setProgressSteps([{ step: 'gathering', message: 'Gathering video signals...', done: false }]);
       
       let r = await fetch('/api/summarize-hybrid', {
         method: 'POST',
@@ -228,18 +191,12 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
           try {
             const parsed = JSON.parse(data);
             
-            if (parsed.progress) {
-              const { step, message } = parsed.progress;
-              setProgressSteps(prev => [...prev, { step, message, done: false }]);
-            }
-            
             if (parsed.prompt) {
               prompt = parsed.prompt;
               if (Array.isArray(parsed.sources)) {
                 sources = parsed.sources;
                 setSources(parsed.sources);
               }
-              setProgressSteps(prev => [...prev.filter(p => p.step !== 'gathering'), { step: 'gathering', message: 'Video signals gathered', done: true }]);
             }
           } catch (e) {
             console.error('SSE parse error:', e);
@@ -253,9 +210,6 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
         return;
       }
 
-      // Now use Puter to generate summary
-      setProgressSteps(prev => [...prev, { step: 'processing', message: 'Generating summary with AI...', done: false }]);
-      
       let fullSummary = '';
       const stream = puterClient.summarizeStream(prompt, { stream: true });
       const iterator = stream[Symbol.asyncIterator]();
@@ -286,19 +240,11 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
           if (event.thinking) {
             thinkingRef.current += event.thinking;
             setThinkingText(thinkingRef.current);
-            setIsThinking(true);
           }
 
           if (event.text) {
             fullSummary += event.text;
             setDisplayedSummary(fullSummary);
-            setProgressSteps(prev => {
-              const hasProcessing = prev.some(p => p.step === 'processing');
-              if (hasProcessing) {
-                return prev.map(p => p.step === 'processing' ? { ...p, done: true } : p);
-              }
-              return prev;
-            });
           }
         }
       } finally {
@@ -312,8 +258,6 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
       }
 
       // Persist summary to backend
-      setProgressSteps(prev => [...prev, { step: 'saving', message: 'Saving summary...', done: false }]);
-      
       const persistRes = await fetch('/api/summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -329,8 +273,6 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
       const { summaryId: persistedSummaryId } = await persistRes.json();
       setSummaryId(persistedSummaryId);
       
-      setProgressSteps(prev => [...prev.map(p => p.step === 'saving' ? { ...p, done: true } : p)]);
-      setProgressPercent(100);
       setSummary(fullSummary);
       setLoading(false);
       setStreaming(false);
@@ -493,94 +435,37 @@ export default function YTSummarisePage({ onBack }: YTSummarisePageProps) {
           </div>
         )}
 
-        {(loading && progressSteps.length === 0) || showInitialSkeleton ? (
-          <div className="manus-initial-loading">
-            <div className="manus-initial-loading-inner">
-              <div className="manus-initial-loading-icon">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="23 7 16 12 23 17 23 7" />
-                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                </svg>
-              </div>
-              <div className="manus-initial-dots">
-                <span /><span /><span />
-              </div>
-              <p className="manus-initial-text">Analyzing video...</p>
-            </div>
-          </div>
-        ) : null}
-
-        {progressSteps.length > 0 && (
-          <div className="manus-live-progress">
-            <div className="manus-live-progress-header">
-              <span className="manus-live-spinner" />
-              <span className="manus-live-title">
-                {progressSteps.some(p => p.step === 'processing' && !p.done) 
-                  ? 'AI is thinking...' 
-                  : 'Analyzing video...'}
+        {(loading || thinkingText) && (
+          <div className="manus-thinking-stream">
+            <div className="manus-thinking-stream-header">
+              {loading && <span className="manus-thinking-stream-spinner" />}
+              <span className="manus-thinking-stream-title">
+                {loading ? (thinkingText ? 'AI is thinking...' : 'Analyzing video...') : 'Thought process'}
               </span>
-              <span className="manus-live-time">
+              <span className="manus-thinking-stream-time">
                 {elapsedSeconds < 5 ? '' : elapsedSeconds < 60 ? `${elapsedSeconds}s` : `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`}
               </span>
-              <button
-                type="button"
-                className="manus-cancel-btn"
-                onClick={() => {
-                  abortControllerRef.current?.abort();
-                  setLoading(false);
-                  setError('');
-                  setProgressSteps([]);
-                  setShowInitialSkeleton(false);
-                }}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
+              {loading && (
+                <button
+                  type="button"
+                  className="manus-cancel-btn"
+                  onClick={() => {
+                    abortControllerRef.current?.abort();
+                    setLoading(false);
+                    setStreaming(false);
+                    setError('');
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              )}
             </div>
-            <div className="manus-live-track">
-              <div className="manus-live-bar" style={{ width: `${progressPercent}%` }} />
-            </div>
-            <div className="manus-live-stream">
-              {progressSteps.filter(p => p.step !== 'thinking').slice(-5).map((step, idx, arr) => {
-                const isLatest = idx === arr.length - 1 && !step.done;
-                return (
-                  <div 
-                    key={step.step + step.timestamp} 
-                    className={`manus-live-step ${step.done ? 'done' : ''} ${isLatest ? 'active' : ''}`}
-                  >
-                    <span className="manus-live-dot">
-                      {step.done ? (
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      ) : isLatest ? (
-                        <span className="manus-live-pulse" />
-                      ) : (
-                        <span className="manus-live-dot-inner" />
-                      )}
-                    </span>
-                    <span className="manus-live-msg">{step.message}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {(isThinking || thinkingText) && (
-          <div className="manus-thinking">
-            <div className="manus-thinking-header">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 16v-4" />
-                <path d="M12 8h.01" />
-              </svg>
-              <span>{isThinking ? 'Thinking...' : 'Thought process'}</span>
-              {isThinking && <span className="manus-thinking-spinner" />}
-            </div>
-            <pre className="manus-thinking-content">{thinkingText}</pre>
+            <pre className="manus-thinking-stream-content" ref={thinkingStreamRef}>
+              {thinkingText || 'Waiting for response...'}
+            </pre>
           </div>
         )}
 
